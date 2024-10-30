@@ -1,0 +1,610 @@
+openapi: 3.0.0
+info:
+  title: User Management and Data Tracking API
+  description: API for managing users, visits, equipment usage, and qualifications.
+  version: "1.0.0"
+
+paths:
+  /users:
+    get:
+      summary: Retrieve all user data
+      responses:
+        '200':
+          description: A list of users
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserInfo'
+
+  /user/{username}:
+    get:
+      summary: Retrieve user data for a specific user
+      parameters:
+        - name: username
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: User data retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserInfo'
+
+    put:
+      summary: Create a new user
+      parameters:
+        - name: username
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '201':
+          description: User created successfully
+
+    patch:
+      summary: Update data for an existing user
+      parameters:
+        - name: username
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: User data updated successfully
+
+    delete:
+      summary: Delete user data
+      parameters:
+        - name: username
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: User deleted successfully
+
+  /visits:
+    get:
+      summary: Retrieve all visit data
+      parameters:
+        - name: before
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: after
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: A list of visits
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VisitInfo'
+
+  /user/{username}/visits:
+    get:
+      summary: Retrieve all visits for a specific user
+      parameters:
+        - name: username
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: before
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: after
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: A list of visits for the specified user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VisitInfo'
+
+    put:
+      summary: Create a new visit for a user
+      parameters:
+        - name: username
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '201':
+          description: Visit entry created successfully
+
+  /equipment:
+    get:
+      summary: Retrieve all equipment usage data
+      parameters:
+        - name: before
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: after
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: A list of equipment usage data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EquipmentUsageInfo'
+
+  /qualifications:
+    get:
+      summary: Retrieve all qualification data
+      parameters:
+        - name: updated_before
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: updated_after
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: A list of qualifications
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QualificationsInfo'
+
+  /user/{username}/qualifications:
+    get:
+      summary: Retrieve qualification data for a specific user
+      parameters:
+        - name: username
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: updated_before
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: updated_after
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: Qualification data retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QualificationsInfo'
+
+    put:
+      summary: Create a new qualification entry for a user
+      parameters:
+        - name: username
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '201':
+          description: Qualification entry created successfully
+
+    patch:
+      summary: Update a qualification entry for a user
+      parameters:
+        - name: username
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Qualification entry updated successfully
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QualificationsInfo'
+
+components:
+  schemas:
+    UserInfo:
+      description: An object containing a user's information. If the university_status is "Undergraduate", then the major and undergraduate_class fields are required.
+      type: object
+      properties:
+        username:
+          $ref: '#/components/schemas/username'
+        id:
+          $ref: '#/components/schemas/id'
+        university_status:
+          $ref: '#/components/schemas/university_status'
+        major:
+          $ref: '#/components/schemas/major'
+        undergraduate_class:
+          $ref: '#/components/schemas/undergraduate_class'
+      required:
+        - username
+        - id
+        - university_status
+      anyOf:
+        - required:
+          - major
+          - undergraduate_class
+
+    VisitInfo:
+      description: An object containing visit information.
+      type: object
+      properties:
+        username:
+          $ref: '#/components/schemas/username'
+        timestamp:
+          $ref: '#/components/schemas/timestamp'
+        location:
+          $ref: '#/components/schemas/location'
+        name:
+          description: The user's first and last name.
+          type: string
+          minLength: 3
+
+    EquipmentUsageInfo:
+      description: An object containing equipment usage information. If the project type is "class", the class_number, faculty_name, and project_sponsor fields are required. If the project type is club, the organization_affiliation field is required. If the equipment type is "3D Printer", then the 3d_printer_info field is required.
+      type: object
+      properties:
+        username:
+          $ref: '#/components/schemas/username'
+        timestamp:
+          $ref: '#/components/schemas/timestamp'
+        location:
+          $ref: '#/components/schemas/location'
+        project_name:
+          description: The name of the project.
+          type: string
+        project_type:
+          description: The type of project. A string enum value.
+          type: string
+          enum: ["Personal", "Class", "Club"]
+        class_number:
+          type: string
+          pattern: "^[A-Z]{4}-[0-9]{4}$"
+        faculty_name:
+          type: string
+          minLength: 1
+        project_sponsor:
+          type: string
+          minLength: 1
+        organization_affiliation:
+          type: string
+          minLength: 1
+        equipment_type:
+          type: string
+          enum: ["3D Printer", "Laser Engraver"]
+        3d_printer_info:
+          type: object
+          properties:
+            printer_name:
+              type: string
+              minLength: 1
+            print_duration:
+              $ref: '#/components/schemas/print_duration'
+            print_mass:
+              $ref: '#/components/schemas/mass'
+            print_mass_estimate:
+              $ref: '#/components/schemas/mass'
+            print_status:
+              description: An enum of strings of possible print statuses.
+              enum: [
+                "In progress",
+                "Success",
+                "Failure"
+              ]
+            print_notes:
+              description: Notes about the print.
+              type: string
+      required:
+        - username
+        - timestamp
+        - location
+        - project_name
+        - project_type
+        - equipment_type
+      anyOf:
+        - required:
+          - class_number
+          - faculty_name
+          - project_sponsor
+        - required:
+          - organization_affiliation
+        - required:
+          - 3d_printer_info
+
+    QualificationsInfo:
+      description: An object containing qualification information about a user.
+      type: object
+      properties:
+        username:
+          $ref: '#/components/schemas/username'
+        last_updated:
+          description: A timestamp for the last time the data was changed.
+          type: string
+          format: date-time
+        trainings:
+          description: An array of training courses and the user’s completion status of them.
+          type: array
+          items:
+            $ref: '#/components/schemas/completable_item'
+        waivers:
+          description: An array of waivers and the user’s completion status of them.
+          type: array
+          items:
+            $ref: '#/components/schemas/completable_item'
+      required:
+        - username
+
+    alphaNumeric:
+      description: A string defined to only be valid for alphanumeric strings.
+      type: string
+      pattern: "^[a-zA-Z0-9]*$"
+
+    username:
+      description: The username a user should be referenced as.
+      $ref: '#/components/schemas/alphaNumeric'
+      minLength: 2
+
+    timestamp:
+      description: A timestamp in date-time format (YYYY-MM-DDThh:mm:ss+LL:LL).
+      type: string
+      format: date-time
+
+    location:
+      description: An enum of strings containing the values of all CU Makerspace locations.
+      type: string
+      enum: ["Watt", "Cooper", "CUICAR"]
+
+    id:
+      description: A id to relate to a user. This data is sensitive and should be used carefully.
+      type: string
+
+    completable_item:
+      description: An object containing the name of a completable item (e.g., training or waiver) and the current completion status.
+      type: object
+      properties:
+        name:
+          description: The name of the completable item.
+          type: string
+          minLength: 1
+        completion_status:
+          description: The current status of the completable item.
+          type: string
+          enum: ["Complete", "Incomplete"]
+
+    mass:
+      description: The mass of an object.
+      type: number
+      format: double
+      minimum: 0
+
+    print_duration:
+      description: The duration of a 3d print in minutes.
+      type: integer
+      minimum: 0
+
+    university_status:
+      description: A string relating to one of the possible university statuses.
+      type: string
+      enum: ["Undergraduate", "Graduate", "Faculty"]
+
+    undergraduate_class:
+      description: An enum of strings of undergraduate classes.
+      type: string
+      enum: [
+        "Freshman",
+        "Sophomore",
+        "Junior",
+        "Senior"
+      ]
+
+    major:
+      description: A major an undergraduate can study.
+      type: string
+      enum: [
+        "Accounting",
+        "African-American/Black Studies",
+        "Agricultural and Extension Education Services",
+        "Agricultural Business and Management, General",
+        "Agricultural Economics",
+        "Agricultural Engineering",
+        "Agricultural Teacher Education",
+        "Agriculture, Agriculture Operations, and Related Sciences",
+        "Agriculture, Agriculture Operations, and Related Sciences, Other",
+        "Animal Genetics",
+        "Animal Physiology",
+        "Animal Sciences, General",
+        "Anthropology",
+        "Applied Behavior Analysis",
+        "Applied Horticulture/Horticulture Operations, General",
+        "Aquaculture",
+        "Architectural and Building Sciences/Technology",
+        "Architecture",
+        "Architecture and Related Services",
+        "Area, Ethnic, Cultural, Gender, and Group Studies",
+        "Art/Art Studies, General",
+        "Behavioral Sciences",
+        "Biochemistry",
+        "Bioengineering and Biomedical Engineering",
+        "Biological and Biomedical Sciences",
+        "Biology/Biological Sciences, General",
+        "Business Administration and Management, General",
+        "Business Administration, Management and Operations, Other",
+        "Business, Management, Marketing, and Related Support Services",
+        "Ceramic Sciences and Engineering",
+        "Chemical Engineering",
+        "Chemistry, General",
+        "Chemistry, Other",
+        "City/Urban, Community and Regional Planning",
+        "Civil Engineering, General",
+        "Communication and Media Studies, Other",
+        "Communication, Journalism, and Related Programs",
+        "Community Psychology",
+        "Computational Science",
+        "Computer and Information Sciences and Support Services",
+        "Computer and Information Sciences, General",
+        "Computer Engineering, General",
+        "Computer Programming/Programmer, General",
+        "Construction Management",
+        "Counselor Education/School Counseling and Guidance Services",
+        "Criminology",
+        "Crisis/Emergency/Disaster Management",
+        "Curriculum and Instruction",
+        "Early Childhood Education and Teaching",
+        "Economics, General",
+        "Education",
+        "Education, General",
+        "Education, Other",
+        "Educational Assessment, Evaluation, and Research, Other",
+        "Educational Leadership and Administration, General",
+        "Educational/Instructional Technology",
+        "Electrical and Electronics Engineering",
+        "Elementary Education and Teaching",
+        "Engineering",
+        "Engineering Technologies and Engineering-Related Fields",
+        "Engineering, General",
+        "Engineering, Other",
+        "Engineering-Related Fields, Other",
+        "English Language and Literature, General",
+        "English Language and Literature/letters",
+        "Entomology",
+        "Environmental Design/Architecture",
+        "Environmental/Environmental Health Engineering",
+        "Epidemiology",
+        "Family and Community Services",
+        "Family and Consumer Sciences/human Sciences",
+        "Film/Cinema/Video Studies",
+        "Finance, General",
+        "Food Science",
+        "Food Science and Technology, Other",
+        "Foreign Languages and Literatures, General",
+        "Foreign Languages, Literatures, and Linguistics",
+        "Foreign Languages, Literatures, and Linguistics, Other",
+        "Forest Management/Forest Resources Management",
+        "Forest Sciences and Biology",
+        "General Studies",
+        "Genome Sciences/Genomics",
+        "Geological and Earth Sciences/Geosciences, Other",
+        "Geology/Earth Science, General",
+        "Health Communication",
+        "Health Professions and Related Clinical Sciences, Other",
+        "Health Professions and Related Programs",
+        "Historic Preservation and Conservation",
+        "History",
+        "History, General",
+        "Homeland Security",
+        "Homeland Security, Law Enforcement, Firefighting and Related Protective Services",
+        "Horticultural Science",
+        "Human Development, Family Studies, and Related Services, Other",
+        "Human Resources Management/Personnel Administration, General",
+        "Human/Medical Genetics",
+        "Industrial and Organizational Psychology",
+        "Industrial and Product Design",
+        "Industrial Engineering",
+        "Informatics",
+        "Information Science/Studies",
+        "International Public Health/International Health",
+        "Junior High/Intermediate/Middle School Education and Teaching",
+        "Landscape Architecture",
+        "Learning Sciences",
+        "Liberal Arts and Sciences, General Studies and Humanities",
+        "Manufacturing Engineering",
+        "Marketing, Other",
+        "Marketing/Marketing Management, General",
+        "Materials Engineering",
+        "Mathematics and Statistics",
+        "Mathematics Teacher Education",
+        "Mathematics, General",
+        "Mechanical Engineering",
+        "Medical Informatics",
+        "Medical Scientist",
+        "Microbiology, General",
+        "Multi-/interdisciplinary Studies, General",
+        "Natural Resources and Conservation",
+        "Natural Resources/Conservation, General",
+        "Non-Profit/Public/Organizational Management",
+        "Nursing Administration",
+        "Nursing Practice",
+        "Nursing Science",
+        "Operations Management and Supervision",
+        "Optics/Optical Sciences",
+        "Organizational Leadership",
+        "Packaging Science",
+        "Parks, Recreation and Leisure Facilities Management, General",
+        "Parks, Recreation and Leisure Studies",
+        "Parks, Recreation, Leisure, and Fitness Studies",
+        "Philosophy",
+        "Philosophy and Religious Studies",
+        "Physical Sciences",
+        "Physics, General",
+        "Plant Sciences, General",
+        "Political Science and Government, General",
+        "Pre-Dentistry Studies",
+        "Pre-Medicine/Pre-Medical Studies",
+        "Pre-Pharmacy Studies",
+        "Professional, Technical, Business, and Scientific Writing",
+        "Psychology",
+        "Psychology, General",
+        "Psychology, Other",
+        "Public Administration",
+        "Public Administration and Social Service Professions",
+        "Public Health, Other",
+        "Public Policy Analysis, General",
+        "Reading Teacher Education",
+        "Real Estate",
+        "Registered Nursing/Registered Nurse",
+        "Religion/Religious Studies",
+        "Rhetoric and Composition",
+        "Science Teacher Education/General Science Teacher Education",
+        "Secondary Education and Teaching",
+        "Selling Skills and Sales Operations",
+        "Sign Language Interpretation and Translation",
+        "Social Sciences",
+        "Social Sciences, Other",
+        "Sociology",
+        "Soil Sciences, Other",
+        "Spanish Language and Literature",
+        "Special Education and Teaching, General",
+        "Speech Communication and Rhetoric",
+        "Sport and Fitness Administration/Management",
+        "Sports Communication",
+        "Systems Engineering",
+        "Teacher Education and Professional Development, Specific Subject Areas, Other",
+        "Technology Teacher Education/Industrial Arts Teacher Education",
+        "Toxicology",
+        "Trade and Industrial Teacher Education",
+        "Transportation/Mobility Management",
+        "Visual and Performing Arts",
+        "Visual and Performing Arts, Other",
+        "Wildlife, Fish and Wildlands Science and Management",
+        "Women's Studies"
+      ]
