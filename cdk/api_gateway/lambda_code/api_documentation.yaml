@@ -233,27 +233,27 @@ paths:
 components:
   schemas:
     UserInfo:
-      description: An object containing a user's information. If the university_status is "Undergraduate", then the major and undergraduate_class fields are required.
+      description: An object containing a user's information. If the universityStatus is "Undergraduate", then the major and undergraduateClass fields are required.
       type: object
       properties:
         username:
           $ref: '#/components/schemas/username'
         id:
           $ref: '#/components/schemas/id'
-        university_status:
-          $ref: '#/components/schemas/university_status'
+        universityStatus:
+          $ref: '#/components/schemas/universityStatus'
         major:
           $ref: '#/components/schemas/major'
-        undergraduate_class:
-          $ref: '#/components/schemas/undergraduate_class'
+        undergraduateClass:
+          $ref: '#/components/schemas/undergraduateClass'
       required:
         - username
         - id
-        - university_status
+        - universityStatus
       anyOf:
         - required:
           - major
-          - undergraduate_class
+          - undergraduateClass
 
     VisitInfo:
       description: An object containing visit information.
@@ -308,8 +308,8 @@ components:
             printer_name:
               type: string
               minLength: 1
-            print_duration:
-              $ref: '#/components/schemas/print_duration'
+            printDuration:
+              $ref: '#/components/schemas/printDuration'
             print_mass:
               $ref: '#/components/schemas/mass'
             print_mass_estimate:
@@ -355,12 +355,12 @@ components:
           description: An array of training courses and the user’s completion status of them.
           type: array
           items:
-            $ref: '#/components/schemas/completable_item'
+            $ref: '#/components/schemas/completeableItem'
         waivers:
           description: An array of waivers and the user’s completion status of them.
           type: array
           items:
-            $ref: '#/components/schemas/completable_item'
+            $ref: '#/components/schemas/completeableItem'
       required:
         - username
 
@@ -388,7 +388,7 @@ components:
       description: A id to relate to a user. This data is sensitive and should be used carefully.
       type: string
 
-    completable_item:
+    completeableItem:
       description: An object containing the name of a completable item (e.g., training or waiver) and the current completion status.
       type: object
       properties:
@@ -396,7 +396,7 @@ components:
           description: The name of the completable item.
           type: string
           minLength: 1
-        completion_status:
+        completionStatus:
           description: The current status of the completable item.
           type: string
           enum: ["Complete", "Incomplete"]
@@ -407,17 +407,17 @@ components:
       format: double
       minimum: 0
 
-    print_duration:
+    printDuration:
       description: The duration of a 3d print in minutes.
       type: integer
       minimum: 0
 
-    university_status:
+    universityStatus:
       description: A string relating to one of the possible university statuses.
       type: string
       enum: ["Undergraduate", "Graduate", "Faculty"]
 
-    undergraduate_class:
+    undergraduateClass:
       description: An enum of strings of undergraduate classes.
       type: string
       enum: [
