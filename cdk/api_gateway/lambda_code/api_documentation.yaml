@@ -16,7 +16,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/UserInfo'
 
-  /user/{username}:
+  /users/{username}:
     get:
       summary: Retrieve user data for a specific user
       parameters:
@@ -54,7 +54,7 @@ paths:
           schema:
             type: string
       responses:
-        '200':
+        '202':
           description: User data updated successfully
 
     delete:
@@ -91,7 +91,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/VisitInfo'
 
-  /user/{username}/visits:
+  /visits/{username}:
     get:
       summary: Retrieve all visits for a specific user
       parameters:
@@ -152,6 +152,58 @@ paths:
               schema:
                 $ref: '#/components/schemas/EquipmentUsageInfo'
 
+  /equipment/{username}:
+    get:
+      summary: Retrieve all equipment entries for a specific user
+      parameters:
+        - name: username
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: before
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: after
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: A list of equipment entries for the specified user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VisitInfo'
+
+    put:
+      summary: Create a new equipment entry for a user
+      parameters:
+        - name: username
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '201':
+          description: Equipment entry created successfully
+
+    patch:
+      summary: Update data for an existing equipment entry
+      parameters:
+        - name: username
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '202':
+          description: Equipment data updated successfully
+
+    
   /qualifications:
     get:
       summary: Retrieve all qualification data
@@ -174,7 +226,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/QualificationsInfo'
 
-  /user/{username}/qualifications:
+  /qualifications/{username}:
     get:
       summary: Retrieve qualification data for a specific user
       parameters:
@@ -222,7 +274,7 @@ paths:
           schema:
             type: string
       responses:
-        '200':
+        '202':
           description: Qualification entry updated successfully
       requestBody:
         content:
