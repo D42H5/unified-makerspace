@@ -78,10 +78,12 @@ paths:
       parameters:
         - name: end_timestamp
           in: query
+          description: Restrict results to those with timestamps less than or equal to end_timestamp. If used alongside start_timestamp, it MUST be greater than or equal to it.
           schema:
             $ref: '#/components/schemas/timestamp'
         - name: start_timestamp
           in: query
+          description: Restrict results to those with timestamps greater than or equal to start_timestamp. If used alongside end_timestamp, it MUST be less than or equal to it.
           schema:
             $ref: '#/components/schemas/timestamp'
       responses:
@@ -106,10 +108,12 @@ paths:
             type: string
         - name: end_timestamp
           in: query
+          description: Restrict results to those with timestamps less than or equal to end_timestamp. If used alongside start_timestamp, it MUST be greater than or equal to it.
           schema:
             $ref: '#/components/schemas/timestamp'
         - name: start_timestamp
           in: query
+          description: Restrict results to those with timestamps greater than or equal to start_timestamp. If used alongside end_timestamp, it MUST be less than or equal to it.
           schema:
             $ref: '#/components/schemas/timestamp'
       responses:
@@ -141,10 +145,12 @@ paths:
       parameters:
         - name: end_timestamp
           in: query
+          description: Restrict results to those with timestamps less than or equal to end_timestamp. If used alongside start_timestamp, it MUST be greater than or equal to it.
           schema:
             $ref: '#/components/schemas/timestamp'
         - name: start_timestamp
           in: query
+          description: Restrict results to those with timestamps greater than or equal to start_timestamp. If used alongside end_timestamp, it MUST be less than or equal to it.
           schema:
             $ref: '#/components/schemas/timestamp'
       responses:
@@ -169,10 +175,12 @@ paths:
             type: string
         - name: end_timestamp
           in: query
+          description: Restrict results to those with timestamps less than or equal to end_timestamp. If used alongside start_timestamp, it MUST be greater than or equal to it.
           schema:
             $ref: '#/components/schemas/timestamp'
         - name: start_timestamp
           in: query
+          description: Restrict results to those with timestamps greater than or equal to start_timestamp. If used alongside end_timestamp, it MUST be less than or equal to it.
           schema:
             $ref: '#/components/schemas/timestamp'
       responses:
@@ -217,10 +225,12 @@ paths:
       parameters:
         - name: end_timestamp
           in: query
+          description: Restrict results to those with timestamps less than or equal to end_timestamp. If used alongside start_timestamp, it MUST be greater than or equal to it.
           schema:
             $ref: '#/components/schemas/timestamp'
         - name: start_timestamp
           in: query
+          description: Restrict results to those with timestamps greater than or equal to start_timestamp. If used alongside end_timestamp, it MUST be less than or equal to it.
           schema:
             $ref: '#/components/schemas/timestamp'
       responses:
@@ -283,24 +293,24 @@ paths:
 components:
   schemas:
     UserInfo:
-      description: An object containing a user's information. If the universityStatus is "Undergraduate", then the major and undergraduateClass fields are required.
+      description: An object containing a user's information. If the university_status is "Undergraduate", then the major and undergraduate_class fields are required.
       type: object
       properties:
         username:
           $ref: '#/components/schemas/username'
-        universityStatus:
-          $ref: '#/components/schemas/universityStatus'
+        university_status:
+          $ref: '#/components/schemas/university_status'
         major:
           $ref: '#/components/schemas/major'
-        undergraduateClass:
-          $ref: '#/components/schemas/undergraduateClass'
+        undergraduate_class:
+          $ref: '#/components/schemas/undergraduate_class'
       required:
         - username
-        - universityStatus
+        - university_status
       anyOf:
         - required:
           - major
-          - undergraduateClass
+          - undergraduate_class
 
     VisitInfo:
       description: An object containing visit information.
@@ -316,6 +326,10 @@ components:
           description: The user's first and last name.
           type: string
           minLength: 3
+      required:
+        - username
+        - timestamp
+        - location
 
     EquipmentUsageData:
       description: An object containing equipment usage data. If the project type is "class", the class_number, faculty_name, and project_sponsor fields are required. If the project type is club, the organization_affiliation field is required. If the equipment type is "3D Printer", then the 3d_printer_info field is required.
@@ -355,8 +369,8 @@ components:
             printer_name:
               type: string
               minLength: 1
-            printDuration:
-              $ref: '#/components/schemas/printDuration'
+            print_duration:
+              $ref: '#/components/schemas/print_duration'
             print_mass:
               $ref: '#/components/schemas/mass'
             print_mass_estimate:
@@ -402,23 +416,23 @@ components:
           description: An array of training courses and the user’s completion status of them.
           type: array
           items:
-            $ref: '#/components/schemas/completeableItem'
+            $ref: '#/components/schemas/completeable_item'
         waivers:
           description: An array of waivers and the user’s completion status of them.
           type: array
           items:
-            $ref: '#/components/schemas/completeableItem'
+            $ref: '#/components/schemas/completeable_item'
       required:
         - username
 
-    alphaNumeric:
+    alpha_numeric:
       description: A string defined to only be valid for alphanumeric strings.
       type: string
       pattern: "^[a-zA-Z0-9]*$"
 
     username:
       description: The username a user should be referenced as.
-      $ref: '#/components/schemas/alphaNumeric'
+      $ref: '#/components/schemas/alpha_numeric'
       minLength: 2
 
     timestamp:
@@ -431,7 +445,7 @@ components:
       type: string
       enum: ["Watt", "Cooper", "CUICAR"]
 
-    completeableItem:
+    completeable_item:
       description: An object containing the name of a completable item (e.g., training or waiver) and the current completion status.
       type: object
       properties:
@@ -439,7 +453,7 @@ components:
           description: The name of the completable item.
           type: string
           minLength: 1
-        completionStatus:
+        completion_status:
           description: The current status of the completable item.
           type: string
           enum: ["Complete", "Incomplete"]
@@ -450,17 +464,17 @@ components:
       format: double
       minimum: 0
 
-    printDuration:
+    print_duration:
       description: The duration of a 3d print in minutes.
       type: integer
       minimum: 0
 
-    universityStatus:
+    university_status:
       description: A string relating to one of the possible university statuses.
       type: string
       enum: ["Undergraduate", "Graduate", "Faculty"]
 
-    undergraduateClass:
+    undergraduate_class:
       description: An enum of strings of undergraduate classes.
       type: string
       enum: [
