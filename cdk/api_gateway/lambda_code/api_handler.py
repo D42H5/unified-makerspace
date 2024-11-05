@@ -21,6 +21,23 @@ class InvalidQueryParameters(BaseException):
         # Initialize exception with args
         super().__init__(*args)
 
+class InvalidRequestBody(BaseException):
+    """
+    An exception that should be raised if a request body
+    does not match requirements.
+    """
+    def __init__(self, *args):
+        """
+        Initialize the exception with a custom message. The message
+        must be passed as an arg.
+        """
+        exceptionMsg = "One (or more) required keys are missing."
+        if not args:
+            args = (exceptionMsg,)
+
+        # Initialize exception with args
+        super().__init__(*args)
+
 # Set up logging
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -48,6 +65,7 @@ qualifications_param_path: str = qualifications_path + user_endpoint
 
 # Other global values
 SCAN_LIMIT: int = 1000
+TIMESTAMP_FORMAT: str = "%Y-%m-%dT%H:%M:%S"
 
 # Main handler function
 def handler(event, context):
@@ -65,19 +83,26 @@ def handler(event, context):
     if user_endpoint in resource_path:
         username = event['pathParameters'].get('username')
 
+        # Make sure no '@' is in username
+        if len(username.split("@")) > 1:
+            errorMsg: str = "Username can't be an email."
+            body = { 'errorMsg': errorMsg }
+            return buildResponse(statusCode = 400, body = body)
+
     # Get the body data if needed
-    data: dict = {}
+    data:dict = {}
     if http_method in method_requires_body:
-        data = event['body']
+        if 'body' not in event:
+            errorMsg: str = "REST method {http_method} requires a request body."
+            body = { 'errorMsg': errorMsg }
+            return buildResponse(statusCode = 400, body = body)
+        data = json.loads(event['body'])
 
     # Try to get any query parameters
     try:
         query_parameters: dict = event['queryStringParameters']
     except:
         query_parameters: dict = {}
-
-    # Get a timestamp to use for this request
-    timestamp: str = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
 
     # FIXME: For debugging purposes right now. Worth keeping?
     logger.info(f"\nLOCAL VARS:\n"
@@ -86,7 +111,6 @@ def handler(event, context):
                 +f"username: {username}\n"
                 +f"data: {data}\n"
                 +f"query_parameters: {query_parameters}\n"
-                +f"timestamp: {timestamp}\n"
     )
 
     # User information request handling
@@ -107,7 +131,7 @@ def handler(event, context):
     elif http_method == "GET" and resource_path == visits_param_path:
         response = get_user_visit_information(username, query_parameters)
     elif http_method == "PUT" and resource_path == visits_param_path:
-        response = add_user_visit_information(data)
+        response = add_user_visit_information(username, data)
 
     # Equipment information request handling
     elif http_method == "GET" and resource_path == equipment_path:
@@ -115,9 +139,9 @@ def handler(event, context):
     elif http_method == "GET" and resource_path == equipment_param_path:
         response = get_user_equipment_usage(username, query_parameters)
     elif http_method == "PUT" and resource_path == equipment_param_path:
-        response = add_user_equipment_usage(username, timestamp, data)
+        response = add_user_equipment_usage(username, data)
     elif http_method == "PATCH" and resource_path == equipment_param_path:
-        response = update_user_equipment_usage(username, timestamp, data)
+        response = update_user_equipment_usage(username, data)
 
     # Qualifications information request handling
     elif http_method == "GET" and resource_path == qualifications_path:
@@ -177,6 +201,7 @@ def buildTimestampKeyExpression(query_parameters: dict, timestamp_attr_name: str
 
     start_timestamp = None
     end_timestamp = None
+
     if "end_timestamp" in query_parameters:
         end_timestamp = query_parameters["end_timestamp"]
     if "start_timestamp" in query_parameters:
@@ -332,6 +357,166 @@ def scanTable(table, filter_expression = None) -> list:
 
     return items
 
+def allKeysPresent(keys: list[str], data: dict) -> bool:
+    """
+    Checks if all strings in a list are in a dictionary.
+
+    :params keys: A list of strings to check as keys for the dictionary.
+    :params data: The dictionary to check the keys against.
+    :returns: True if all keys are present, false if at least one of them isn't.
+    """
+
+    for key in keys:
+        if key not in data:
+            return False
+    return True
+
+def validateUserRequestBody(username: str, data: dict):
+    """
+    Valides the request body used when adding/updating user information.
+    Will raise an InvalidRequestBody error with the details explaining
+    what part of the body is invalid.
+
+    :params username: The name of the user.
+    :params data: The request body to validate.
+    :raises: InvalidRequestBody
+    """
+
+    required_fields: list[str] = ["username", "university_status"]
+    status_fields: list[str] = ["undergraduate_class"]
+
+    # Ensure all required fields are present
+    if not allKeysPresent(required_fields, data):
+        errorMsg: str = f"Missing at least one field from {required_fields} in requestBody."
+        raise InvalidRequestBody(errorMsg)
+
+    # Make sure the data contains the same username as the path username
+    if username != data['username']:
+        errorMsg: str = f"Path parameter username and request body username don't match."
+        raise InvalidRequestBody(errorMsg)
+
+    # Ensure all status fields are present if data['university_status'] == "Undergraduate"
+    if data['university_status'] == "Undergraduate":
+        if not allKeysPresent(status_fields, data):
+            errorMsg: str = f"Missing at least one field from {status_fields} in requestBody."
+            raise InvalidRequestBody(errorMsg)
+
+def validateVisitRequestBody(username: str, data: dict):
+    """
+    Valides the request body used when adding/updating user information.
+    Will raise an InvalidRequestBody error with the details explaining
+    what part of the body is invalid.
+
+    :params username: The name of the user.
+    :params data: The request body to validate.
+    :raises: InvalidRequestBody
+    """
+
+    required_fields: list[str] = ["username", "timestamp", "location"]
+
+    # Ensure all required fields are present
+    if not allKeysPresent(required_fields, data):
+        errorMsg: str = f"Missing at least one field from {required_fields} in requestBody."
+        raise InvalidRequestBody(errorMsg)
+
+    # Make sure the data contains the same username as the path username
+    if username != data['username']:
+        errorMsg: str = f"Path parameter username and request body username don't match."
+        raise InvalidRequestBody(errorMsg)
+
+    # Ensure timestamp is in the correct format
+    try:
+        datetime.strptime(data['timestamp'], TIMESTAMP_FORMAT)
+    except ValueError:
+        errorMsg: str = f"Timestamp not in the approved format. Approved format is 'YYYY-MM-DDThh:mm:ss'."
+        raise InvalidRequestBody(errorMsg)
+
+def validateEquipmentRequestBody(username: str, data: dict):
+    """
+    Valides the request body used when adding/updating user information.
+    Will raise an InvalidRequestBody error with the details explaining
+    what part of the body is invalid.
+
+    :params username: The name of the user.
+    :params data: The request body to validate.
+    :raises: InvalidRequestBody
+    """
+
+    required_fields: list[str] = ["username", "timestamp", "location",
+                                  "project_name", "project_type", "equipment_type"]
+    
+    class_project_fields: list[str] = ["class_number", "faculty_name", "project_sponsor"]
+    club_project_fields: list[str] = ["organization_affiliation"]
+
+    equipment_3d_printer_fields: list[str] = ["printer_name", "print_duration",
+                                              "print_mass", "print_mass_estimate",
+                                              "print_status", "print_notes"]
+
+    # Ensure all required fields are present
+    if not allKeysPresent(required_fields, data):
+        errorMsg: str = f"Missing at least one field from {required_fields} in requestBody."
+        raise InvalidRequestBody(errorMsg)
+
+    # Project Type field assertion
+    # Ensure all class project fields are present if data["project_type"] == "Class"
+    if data["project_type"] == "Class":
+        if not allKeysPresent(class_project_fields, data):
+            errorMsg: str = f"Missing at least one field from {class_project_fields} in requestBody."
+            raise InvalidRequestBody(errorMsg)
+
+    # Ensure all club project fields are present if data["project_type"] == "Club"
+    elif data["project_type"] == "Club":
+        if not allKeysPresent(club_project_fields, data):
+            errorMsg: str = f"Missing at least one field from {club_project_fields} in requestBody."
+            raise InvalidRequestBody(errorMsg)
+
+    # Equipment type field assertion
+    # Ensure all 3D Printer fields are present if data["equipment_type"] == "3D Printer"
+    if data["equipment_type"] == "3D Printer":
+        if '3d_printer_info' not in data:
+            errorMsg: str = f"Missing '3d_printer_info' object in requestBody."
+            raise InvalidRequestBody(errorMsg)
+
+        if not allKeysPresent(equipment_3d_printer_fields, data['3d_printer_info']):
+            errorMsg: str = f"Missing at least one field from {equipment_3d_printer_fields} in requestBody."
+            raise InvalidRequestBody(errorMsg)
+
+    # Make sure the data contains the same username as the path username
+    if username != data['username']:
+        errorMsg: str = f"Path parameter username and request body username don't match."
+        raise InvalidRequestBody(errorMsg)
+
+    # Ensure timestamp is in the correct format
+    try:
+        datetime.strptime(data['timestamp'], TIMESTAMP_FORMAT)
+    except ValueError:
+        errorMsg: str = f"Timestamp not in the approved format. Approved format is 'YYYY-MM-DDThh:mm:ss'."
+        raise InvalidRequestBody(errorMsg)
+
+def validateQualificationRequestBody(username: str, data: dict):
+    """
+    Valides the request body used when adding/updating user information.
+    Will raise an InvalidRequestBody error with the details explaining
+    what part of the body is invalid.
+
+    :params username: The name of the user.
+    :params data: The request body to validate.
+    :raises: InvalidRequestBody
+    """
+
+    required_fields: list[str] = ["username"]
+
+    # Ensure all required fields are present
+    if not allKeysPresent(required_fields, data):
+        errorMsg: str = f"Missing at least one field from {required_fields} in requestBody."
+        raise InvalidRequestBody(errorMsg)
+
+    # Make sure the data contains the same username as the path username
+    if username != data['username']:
+        errorMsg: str = f"Path parameter username and request body username don't match."
+        raise InvalidRequestBody(errorMsg)
+
+
 ######################################
 # User information function handlers #
 ######################################
@@ -381,7 +566,33 @@ def add_user_information(username: str, data: dict):
     :params username: The name of the user.
     :params data: The user information to store.
     """
-    return buildResponse(statusCode = 200, body = {})
+    table = dynamodb.Table(user_table_name)
+
+    try:
+        validateUserRequestBody(username, data)
+    except InvalidRequestBody as irb:
+        body = { 'errorMsg': str(irb) }
+        return buildResponse(statusCode = 400, body = body)
+
+    # Check to make sure the user doesn't already exist. Return 400 if user does exist.
+    response = get_user_information(username)
+    if response['statusCode'] == 200:
+        errorMsg: str = f"User {username} information already exists. Did you mean to update?"
+        body = { 'errorMsg': errorMsg }
+        return buildResponse(statusCode = 400, body = body)
+
+    # Actually try putting the item into the table
+    try:
+        table.put_item(
+            Item=data
+        )
+    except Exception as e:
+        logger.info(e)
+        body = { 'errorMsg': "Something went wrong on the server." }
+        return buildResponse(statusCode = 500, body = body)
+
+    # If here, put action succeeded. Return 201
+    return buildResponse(statusCode = 201, body = {})
 
 def update_user_information(username: str, data: dict):
     """
@@ -484,13 +695,37 @@ def get_user_visit_information(username: str, query_parameters: dict):
 
     return buildResponse(statusCode = 200, body = body)
 
-def add_user_visit_information(data: dict):
+def add_user_visit_information(username: str, data: dict):
     """
     Adds a new visit entry for a user to the visit information table.
 
+    :params username: The name of the user.
     :params data: The visit entry to add.
     """
-    return buildResponse(statusCode = 200, body = {})
+
+    table = dynamodb.Table(visit_table_name)
+
+    try:
+        validateVisitRequestBody(username, data)
+    except InvalidRequestBody as irb:
+        body = { 'errorMsg': str(irb) }
+        return buildResponse(statusCode = 400, body = body)
+
+    # Always force "_ignore" key to have value of "1"
+    data['_ignore'] = "1"
+
+    # Actually try putting the item into the table
+    try:
+        table.put_item(
+            Item=data
+        )
+    except Exception as e:
+        logger.info(e)
+        body = { 'errorMsg': "Something went wrong on the server." }
+        return buildResponse(statusCode = 500, body = body)
+
+    # If here, put action succeeded. Return 201
+    return buildResponse(statusCode = 201, body = {})
 
 
 #################################################
@@ -575,23 +810,44 @@ def get_user_equipment_usage(username: str, query_parameters: dict):
 
     return buildResponse(statusCode = 200, body = body)
 
-def add_user_equipment_usage(username: str, timestamp, data: dict):
+def add_user_equipment_usage(username: str, data: dict):
     """
     Adds an equipment usage entry for a specified user to the equipment usage table.
 
     :params username: The name of the user.
-    :params timestamp: The timestamp of the entry.
     :params data: The equipment usage entry to store.
     """
-    return buildResponse(statusCode = 200, body = {})
 
-def update_user_equipment_usage(username: str, timestamp, data: dict):
+    table = dynamodb.Table(equipment_table_name)
+
+    try:
+        validateEquipmentRequestBody(username, data)
+    except InvalidRequestBody as irb:
+        body = { 'errorMsg': str(irb) }
+        return buildResponse(statusCode = 400, body = body)
+
+    # Always force "_ignore" key to have value of "1"
+    data['_ignore'] = "1"
+
+    # Actually try putting the item into the table
+    try:
+        table.put_item(
+            Item=data
+        )
+    except Exception as e:
+        logger.info(e)
+        body = { 'errorMsg': "Something went wrong on the server." }
+        return buildResponse(statusCode = 500, body = body)
+
+    # If here, put action succeeded. Return 201
+    return buildResponse(statusCode = 201, body = {})
+
+def update_user_equipment_usage(username: str, data: dict):
     """
     Updates an equipment usage entry for a specified user. Fails if no entry with a
     corresponding username and timetamp exists.
 
     :params username: The name of the user.
-    :params timestamp: The timestamp in the entry to retrieve.
     :params data: The updated equipment usage entry.
     """
     return buildResponse(statusCode = 200, body = {})
@@ -651,6 +907,7 @@ def get_user_qualifications(username: str):
 
     :params username: The name of the user.
     """
+
     table = dynamodb.Table(qualifications_table_name)
 
     response = table.get_item(
@@ -677,7 +934,48 @@ def add_user_qualifications(username: str, data: dict):
     :params username: The name of the user.
     :params data: The qualifications information entry to add.
     """
-    return buildResponse(statusCode = 200, body = {})
+
+    table = dynamodb.Table(qualifications_table_name)
+
+    try:
+        validateQualificationRequestBody(username, data)
+    except InvalidRequestBody as irb:
+        body = { 'errorMsg': str(irb) }
+        return buildResponse(statusCode = 400, body = body)
+
+    # If 'last_updated' not in data, stored the formatted current time
+    if 'last_updated' not in data:
+        data['last_updated'] = datetime.now().strftime(TIMESTAMP_FORMAT)
+
+    # If 'trainings' not in data, store an empty list
+    if 'trainings' not in data:
+        data['trainings'] = []
+
+    # If 'waivers' not in data, store an empty list
+    if 'waivers' not in data:
+        data['waivers'] = []
+    # Always force "_ignore" key to have value of "1"
+    data['_ignore'] = "1"
+
+    # Check to make sure the user doesn't already exist. Return 400 if user does exist.
+    response = get_user_qualifications(username)
+    if response['statusCode'] == 200:
+        errorMsg: str = f"User {username} qualifications already exist. Did you mean to update?"
+        body = { 'errorMsg': errorMsg }
+        return buildResponse(statusCode = 400, body = body)
+
+    # Actually try putting the item into the table
+    try:
+        table.put_item(
+            Item=data
+        )
+    except Exception as e:
+        logger.info(e)
+        body = { 'errorMsg': "Something went wrong on the server." }
+        return buildResponse(statusCode = 500, body = body)
+
+    # If here, put action succeeded. Return 201
+    return buildResponse(statusCode = 201, body = {})
 
 def update_user_qualifications(username: str, data: dict):
     """
