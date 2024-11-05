@@ -10,11 +10,14 @@ paths:
       summary: Retrieve all user data
       responses:
         '200':
-          description: A list of users
+          description: A list of all users and their information
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UserInfo'
+                users:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/UserInfo'
 
   /users/{username}:
     get:
@@ -73,23 +76,24 @@ paths:
     get:
       summary: Retrieve all visit data
       parameters:
-        - name: before
+        - name: end_timestamp
           in: query
           schema:
-            type: string
-            format: date-time
-        - name: after
+            $ref: '#/components/schemas/timestamp'
+        - name: start_timestamp
           in: query
           schema:
-            type: string
-            format: date-time
+            $ref: '#/components/schemas/timestamp'
       responses:
         '200':
-          description: A list of visits
+          description: A list of all visits
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/VisitInfo'
+                visits:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/VisitInfo'
 
   /visits/{username}:
     get:
@@ -100,23 +104,24 @@ paths:
           required: true
           schema:
             type: string
-        - name: before
+        - name: end_timestamp
           in: query
           schema:
-            type: string
-            format: date-time
-        - name: after
+            $ref: '#/components/schemas/timestamp'
+        - name: start_timestamp
           in: query
           schema:
-            type: string
-            format: date-time
+            $ref: '#/components/schemas/timestamp'
       responses:
         '200':
           description: A list of visits for the specified user
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/VisitInfo'
+                visits:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/VisitInfo'
 
     put:
       summary: Create a new visit for a user
@@ -128,59 +133,61 @@ paths:
             type: string
       responses:
         '201':
-          description: Visit entry created successfully
+          description: Visit log created successfully
 
   /equipment:
     get:
       summary: Retrieve all equipment usage data
       parameters:
-        - name: before
+        - name: end_timestamp
           in: query
           schema:
-            type: string
-            format: date-time
-        - name: after
+            $ref: '#/components/schemas/timestamp'
+        - name: start_timestamp
           in: query
           schema:
-            type: string
-            format: date-time
+            $ref: '#/components/schemas/timestamp'
       responses:
         '200':
-          description: A list of equipment usage data
+          description: A list of all equipment usage data entries
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/EquipmentUsageInfo'
+                equipment_logs:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/EquipmentUsageData'
 
   /equipment/{username}:
     get:
-      summary: Retrieve all equipment entries for a specific user
+      summary: Retrieve all equipment usage data for a specific user
       parameters:
         - name: username
           in: path
           required: true
           schema:
             type: string
-        - name: before
+        - name: end_timestamp
           in: query
           schema:
-            type: string
-            format: date-time
-        - name: after
+            $ref: '#/components/schemas/timestamp'
+        - name: start_timestamp
           in: query
           schema:
-            type: string
-            format: date-time
+            $ref: '#/components/schemas/timestamp'
       responses:
         '200':
-          description: A list of equipment entries for the specified user
+          description: A list of equipment usage data for the specified user
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/VisitInfo'
+                equipment_logs:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/EquipmentUsageData'
 
     put:
-      summary: Create a new equipment entry for a user
+      summary: Create a new equipment usage data entry for a user
       parameters:
         - name: username
           in: path
@@ -189,10 +196,10 @@ paths:
             type: string
       responses:
         '201':
-          description: Equipment entry created successfully
+          description: Equipment usage data created successfully
 
     patch:
-      summary: Update data for an existing equipment entry
+      summary: Update data in an existing equipment usage data entry
       parameters:
         - name: username
           in: path
@@ -201,30 +208,31 @@ paths:
             type: string
       responses:
         '202':
-          description: Equipment data updated successfully
+          description: Equipment usage data updated successfully
 
     
   /qualifications:
     get:
       summary: Retrieve all qualification data
       parameters:
-        - name: updated_before
+        - name: end_timestamp
           in: query
           schema:
-            type: string
-            format: date-time
-        - name: updated_after
+            $ref: '#/components/schemas/timestamp'
+        - name: start_timestamp
           in: query
           schema:
-            type: string
-            format: date-time
+            $ref: '#/components/schemas/timestamp'
       responses:
         '200':
-          description: A list of qualifications
+          description: A list of all qualifications
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/QualificationsInfo'
+                qualifications:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/QualificationsInfo'
 
   /qualifications/{username}:
     get:
@@ -235,16 +243,6 @@ paths:
           required: true
           schema:
             type: string
-        - name: updated_before
-          in: query
-          schema:
-            type: string
-            format: date-time
-        - name: updated_after
-          in: query
-          schema:
-            type: string
-            format: date-time
       responses:
         '200':
           description: Qualification data retrieved successfully
@@ -290,8 +288,6 @@ components:
       properties:
         username:
           $ref: '#/components/schemas/username'
-        id:
-          $ref: '#/components/schemas/id'
         universityStatus:
           $ref: '#/components/schemas/universityStatus'
         major:
@@ -300,7 +296,6 @@ components:
           $ref: '#/components/schemas/undergraduateClass'
       required:
         - username
-        - id
         - universityStatus
       anyOf:
         - required:
@@ -322,8 +317,8 @@ components:
           type: string
           minLength: 3
 
-    EquipmentUsageInfo:
-      description: An object containing equipment usage information. If the project type is "class", the class_number, faculty_name, and project_sponsor fields are required. If the project type is club, the organization_affiliation field is required. If the equipment type is "3D Printer", then the 3d_printer_info field is required.
+    EquipmentUsageData:
+      description: An object containing equipment usage data. If the project type is "class", the class_number, faculty_name, and project_sponsor fields are required. If the project type is club, the organization_affiliation field is required. If the equipment type is "3D Printer", then the 3d_printer_info field is required.
       type: object
       properties:
         username:
@@ -427,7 +422,7 @@ components:
       minLength: 2
 
     timestamp:
-      description: A timestamp in date-time format (YYYY-MM-DDThh:mm:ss+LL:LL).
+      description: A timestamp in date-time format (YYYY-MM-DDThh:mm:ss) in EST.
       type: string
       format: date-time
 
@@ -435,10 +430,6 @@ components:
       description: An enum of strings containing the values of all CU Makerspace locations.
       type: string
       enum: ["Watt", "Cooper", "CUICAR"]
-
-    id:
-      description: A id to relate to a user. This data is sensitive and should be used carefully.
-      type: string
 
     completeableItem:
       description: An object containing the name of a completable item (e.g., training or waiver) and the current completion status.
