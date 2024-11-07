@@ -1,3 +1,13 @@
+"""
+TODO
+***
+- PUT -> POST
+- Split current request body validators into collections of individual checks that can be explicitly called. Should allow for more robust request body validation of any kind (e.g., post and update).
+- PATCH actually implemented
+***
+- Delete actually implemented
+- Manually generate timestamp for equipment and qualifications. Visit timestamp should still be given in request body.
+"""
 import boto3
 from boto3.dynamodb.conditions import Key, Attr
 import json
@@ -46,14 +56,13 @@ logger.setLevel(logging.INFO)
 dynamodb = boto3.resource('dynamodb', region_name='us-east-1')
 
 # Table names
-user_table_name = 'beta-test-user-information'
-#visit_table_name = 'beta-test-visit-information'
-visit_table_name = 'test2'
-equipment_table_name = 'beta-test-equipment-information'
-qualifications_table_name = 'beta-test-training-information'
+user_table_name = 'new-test-user'
+visit_table_name = 'new-test-visits'
+equipment_table_name = 'new-test-equipment'
+qualifications_table_name = 'new-test-qualifications'
 
 # Define path constants
-user_endpoint: str = "/{username}"
+user_endpoint: str = "/{user_id}"
 users_path: str = "/users"
 users_param_path: str = users_path + user_endpoint
 visits_path: str = "/visits"
@@ -66,97 +75,111 @@ qualifications_param_path: str = qualifications_path + user_endpoint
 # Other global values
 SCAN_LIMIT: int = 1000
 TIMESTAMP_FORMAT: str = "%Y-%m-%dT%H:%M:%S"
+TIMESTAMP_INDEX: str = "TimestampIndex"
 
 # Main handler function
 def handler(event, context):
-    logger.info(f"\nRequest event method: {event.get("httpMethod")}")
-    logger.info(f"\nEVENT\n{json.dumps(event, indent=2)}")
-
-    method_requires_body: list = ["PUT", "PATCH"]
-
-    response = buildResponse(statusCode = 400, body = {})
-    http_method: str = event.get("httpMethod")
-    resource_path: str = event.get("resource")
-
-    # Get a username if needed
-    username: str = ""
-    if user_endpoint in resource_path:
-        username = event['pathParameters'].get('username')
-
-        # Make sure no '@' is in username
-        if len(username.split("@")) > 1:
-            errorMsg: str = "Username can't be an email."
-            body = { 'errorMsg': errorMsg }
-            return buildResponse(statusCode = 400, body = body)
-
-    # Get the body data if needed
-    data:dict = {}
-    if http_method in method_requires_body:
-        if 'body' not in event:
-            errorMsg: str = "REST method {http_method} requires a request body."
-            body = { 'errorMsg': errorMsg }
-            return buildResponse(statusCode = 400, body = body)
-        data = json.loads(event['body'])
-
-    # Try to get any query parameters
     try:
-        query_parameters: dict = event['queryStringParameters']
-    except:
-        query_parameters: dict = {}
+        logger.info(f"\nRequest event method: {event.get("httpMethod")}")
+        logger.info(f"\nEVENT\n{json.dumps(event, indent=2)}")
 
-    # FIXME: For debugging purposes right now. Worth keeping?
-    logger.info(f"\nLOCAL VARS:\n"
-                +f"http_method: {http_method}\n"
-                +f"resource_path: {resource_path}\n"
-                +f"username: {username}\n"
-                +f"data: {data}\n"
-                +f"query_parameters: {query_parameters}\n"
-    )
+        method_requires_body: list = ["POST", "PATCH"]
 
-    # User information request handling
-    if http_method == "GET" and resource_path == users_path:
-        response = get_all_user_information()
-    elif http_method == "GET" and resource_path == users_param_path:
-        response = get_user_information(username)
-    elif http_method == "PUT" and resource_path == users_param_path:
-        response = add_user_information(username, data)
-    elif http_method == "PATCH" and resource_path == users_param_path:
-        response = update_user_information(username, data)
-    elif http_method == "DELETE" and resource_path == users_param_path:
-        response = delete_user_information(username)
+        response = buildResponse(statusCode = 400, body = {})
+        http_method: str = event.get("httpMethod")
+        resource_path: str = event.get("resource")
 
-    # Visit information request handling
-    elif http_method == "GET" and resource_path == visits_path:
-        response = get_all_visit_information(query_parameters)
-    elif http_method == "GET" and resource_path == visits_param_path:
-        response = get_user_visit_information(username, query_parameters)
-    elif http_method == "PUT" and resource_path == visits_param_path:
-        response = add_user_visit_information(username, data)
+        # Get a user_id if needed
+        user_id: str = ""
+        if user_endpoint in resource_path:
+            user_id = event['pathParameters'].get('user_id')
 
-    # Equipment information request handling
-    elif http_method == "GET" and resource_path == equipment_path:
-        response = get_all_equipment_usage_information(query_parameters)
-    elif http_method == "GET" and resource_path == equipment_param_path:
-        response = get_user_equipment_usage(username, query_parameters)
-    elif http_method == "PUT" and resource_path == equipment_param_path:
-        response = add_user_equipment_usage(username, data)
-    elif http_method == "PATCH" and resource_path == equipment_param_path:
-        response = update_user_equipment_usage(username, data)
+            # Make sure no '@' is in user_id
+            if len(user_id.split("@")) > 1:
+                errorMsg: str = "user_id can't be an email."
+                body = { 'errorMsg': errorMsg }
+                return buildResponse(statusCode = 400, body = body)
 
-    # Qualifications information request handling
-    elif http_method == "GET" and resource_path == qualifications_path:
-        response = get_all_qualifications_information(query_parameters)
-    elif http_method == "GET" and resource_path == qualifications_param_path:
-        response = get_user_qualifications(username)
-    elif http_method == "PUT" and resource_path == qualifications_param_path:
-        response = add_user_qualifications(username, data)
-    elif http_method == "PATCH" and resource_path == qualifications_param_path:
-        response = update_user_qualifications(username, data)
+        # Get the body data if needed
+        data:dict = {}
+        if http_method in method_requires_body:
+            if 'body' not in event:
+                errorMsg: str = "REST method {http_method} requires a request body."
+                body = { 'errorMsg': errorMsg }
+                return buildResponse(statusCode = 400, body = body)
+            data = json.loads(event['body'])
 
-    # FIXME: For debugging purposes right now. Worth keeping?
-    logger.info(f"\nFINAL RESPONSE:\n{response}")
-    return response
+        # Try to get any query parameters
+        try:
+            query_parameters: dict = event['queryStringParameters']
+        except:
+            query_parameters: dict = {}
 
+        # FIXME: For debugging purposes right now. Worth keeping?
+        logger.info(f"\nLOCAL VARS:\n"
+                    +f"http_method: {http_method}\n"
+                    +f"resource_path: {resource_path}\n"
+                    +f"user_id: {user_id}\n"
+                    +f"data: {data}\n"
+                    +f"query_parameters: {query_parameters}\n"
+        )
+
+        # User information request handling
+        if http_method == "GET" and resource_path == users_path:
+            response = get_all_user_information()
+        elif http_method == "POST" and resource_path == users_path:
+            response = create_user_information(data)
+
+        elif http_method == "GET" and resource_path == users_param_path:
+            response = get_user_information(user_id)
+        elif http_method == "PATCH" and resource_path == users_param_path:
+            response = patch_user_information(user_id, data)
+        elif http_method == "DELETE" and resource_path == users_param_path:
+            response = delete_user_information(user_id)
+
+
+        # Visit information request handling
+        elif http_method == "GET" and resource_path == visits_path:
+            response = get_all_visit_information(query_parameters)
+        elif http_method == "POST" and resource_path == visits_path:
+            response = create_user_visit_information(data)
+
+        elif http_method == "GET" and resource_path == visits_param_path:
+            response = get_user_visit_information(user_id, query_parameters)
+
+
+        # Equipment information request handling
+        elif http_method == "GET" and resource_path == equipment_path:
+            response = get_all_equipment_usage_information(query_parameters)
+        elif http_method == "POST" and resource_path == equipment_path:
+            response = create_user_equipment_usage(data)
+
+        elif http_method == "GET" and resource_path == equipment_param_path:
+            response = get_user_equipment_usage(user_id, query_parameters)
+        elif http_method == "PATCH" and resource_path == equipment_param_path:
+            response = patch_user_equipment_usage(user_id, data)
+
+
+        # Qualifications information request handling
+        elif http_method == "GET" and resource_path == qualifications_path:
+            response = get_all_qualifications_information(query_parameters)
+        elif http_method == "POST" and resource_path == qualifications_path:
+            response = create_user_qualifications(data)
+
+        elif http_method == "GET" and resource_path == qualifications_param_path:
+            response = get_user_qualifications(user_id)
+        elif http_method == "PATCH" and resource_path == qualifications_param_path:
+            response = patch_user_qualifications(user_id, data)
+
+
+        # FIXME: For debugging purposes right now. Worth keeping?
+        logger.info(f"\nFINAL RESPONSE:\n{response}")
+        return response
+    except Exception as e:
+        logger.info(e)
+        errorMsg: str = f"{str(e)}"
+        body = { 'errorMsg': errorMsg }
+        return buildResponse(statusCode = 599, body = body)
 
 ####################
 # Helper functions #
@@ -371,28 +394,22 @@ def allKeysPresent(keys: list[str], data: dict) -> bool:
             return False
     return True
 
-def validateUserRequestBody(username: str, data: dict):
+def validateCreateUserRequestBody(data: dict):
     """
-    Valides the request body used when adding/updating user information.
+    Valides the request body used when creating a user information entry.
     Will raise an InvalidRequestBody error with the details explaining
     what part of the body is invalid.
 
-    :params username: The name of the user.
     :params data: The request body to validate.
     :raises: InvalidRequestBody
     """
 
-    required_fields: list[str] = ["username", "university_status"]
+    required_fields: list[str] = ["user_id", "university_status"]
     status_fields: list[str] = ["undergraduate_class"]
 
     # Ensure all required fields are present
     if not allKeysPresent(required_fields, data):
         errorMsg: str = f"Missing at least one field from {required_fields} in requestBody."
-        raise InvalidRequestBody(errorMsg)
-
-    # Make sure the data contains the same username as the path username
-    if username != data['username']:
-        errorMsg: str = f"Path parameter username and request body username don't match."
         raise InvalidRequestBody(errorMsg)
 
     # Ensure all status fields are present if data['university_status'] == "Undergraduate"
@@ -401,27 +418,21 @@ def validateUserRequestBody(username: str, data: dict):
             errorMsg: str = f"Missing at least one field from {status_fields} in requestBody."
             raise InvalidRequestBody(errorMsg)
 
-def validateVisitRequestBody(username: str, data: dict):
+def validateCreateVisitRequestBody(data: dict):
     """
     Valides the request body used when adding/updating user information.
     Will raise an InvalidRequestBody error with the details explaining
     what part of the body is invalid.
 
-    :params username: The name of the user.
     :params data: The request body to validate.
     :raises: InvalidRequestBody
     """
 
-    required_fields: list[str] = ["username", "timestamp", "location"]
+    required_fields: list[str] = ["user_id", "timestamp", "location"]
 
     # Ensure all required fields are present
     if not allKeysPresent(required_fields, data):
         errorMsg: str = f"Missing at least one field from {required_fields} in requestBody."
-        raise InvalidRequestBody(errorMsg)
-
-    # Make sure the data contains the same username as the path username
-    if username != data['username']:
-        errorMsg: str = f"Path parameter username and request body username don't match."
         raise InvalidRequestBody(errorMsg)
 
     # Ensure timestamp is in the correct format
@@ -431,18 +442,17 @@ def validateVisitRequestBody(username: str, data: dict):
         errorMsg: str = f"Timestamp not in the approved format. Approved format is 'YYYY-MM-DDThh:mm:ss'."
         raise InvalidRequestBody(errorMsg)
 
-def validateEquipmentRequestBody(username: str, data: dict):
+def validateCreateEquipmentRequestBody(data: dict):
     """
     Valides the request body used when adding/updating user information.
     Will raise an InvalidRequestBody error with the details explaining
     what part of the body is invalid.
 
-    :params username: The name of the user.
     :params data: The request body to validate.
     :raises: InvalidRequestBody
     """
 
-    required_fields: list[str] = ["username", "timestamp", "location",
+    required_fields: list[str] = ["user_id", "timestamp", "location",
                                   "project_name", "project_type", "equipment_type"]
     
     class_project_fields: list[str] = ["class_number", "faculty_name", "project_sponsor"]
@@ -481,11 +491,6 @@ def validateEquipmentRequestBody(username: str, data: dict):
             errorMsg: str = f"Missing at least one field from {equipment_3d_printer_fields} in requestBody."
             raise InvalidRequestBody(errorMsg)
 
-    # Make sure the data contains the same username as the path username
-    if username != data['username']:
-        errorMsg: str = f"Path parameter username and request body username don't match."
-        raise InvalidRequestBody(errorMsg)
-
     # Ensure timestamp is in the correct format
     try:
         datetime.strptime(data['timestamp'], TIMESTAMP_FORMAT)
@@ -493,27 +498,22 @@ def validateEquipmentRequestBody(username: str, data: dict):
         errorMsg: str = f"Timestamp not in the approved format. Approved format is 'YYYY-MM-DDThh:mm:ss'."
         raise InvalidRequestBody(errorMsg)
 
-def validateQualificationRequestBody(username: str, data: dict):
+def validateCreateQualificationRequestBody(data: dict):
     """
     Valides the request body used when adding/updating user information.
     Will raise an InvalidRequestBody error with the details explaining
     what part of the body is invalid.
 
-    :params username: The name of the user.
+    :params user_id: The name of the user.
     :params data: The request body to validate.
     :raises: InvalidRequestBody
     """
 
-    required_fields: list[str] = ["username"]
+    required_fields: list[str] = ["user_id"]
 
     # Ensure all required fields are present
     if not allKeysPresent(required_fields, data):
         errorMsg: str = f"Missing at least one field from {required_fields} in requestBody."
-        raise InvalidRequestBody(errorMsg)
-
-    # Make sure the data contains the same username as the path username
-    if username != data['username']:
-        errorMsg: str = f"Path parameter username and request body username don't match."
         raise InvalidRequestBody(errorMsg)
 
 
@@ -534,50 +534,26 @@ def get_all_user_information():
     body = { 'users': users }
     return buildResponse(statusCode = 200, body = body)
 
-def get_user_information(username: str):
-    """
-    Gets all of the information for the specified user.
-
-    :params username: The name of the user.
-    """
-
-    table = dynamodb.Table(user_table_name)
-    response = table.get_item(
-            Key={ 'username': username }
-    )
-
-    # Username doesn't exist if 'Item' not in response
-    if 'Item' not in response:
-        errorMsg: str = f"No information for the user {username} could be found. Is there a typo?"
-        body = { 'errorMsg': errorMsg }
-        return buildResponse(statusCode = 400, body = body)
-
-    user = response['Item']
-
-    # FIXME: For debugging purposes right now. Worth keeping?
-    logger.info(f"\nUser:\n{user}")
-
-    return buildResponse(statusCode = 200, body = user)
-
-def add_user_information(username: str, data: dict):
+def create_user_information(data: dict):
     """
     Adds a new user to the user information table.
 
-    :params username: The name of the user.
     :params data: The user information to store.
     """
+
     table = dynamodb.Table(user_table_name)
 
     try:
-        validateUserRequestBody(username, data)
+        validateCreateUserRequestBody(data)
     except InvalidRequestBody as irb:
         body = { 'errorMsg': str(irb) }
         return buildResponse(statusCode = 400, body = body)
 
     # Check to make sure the user doesn't already exist. Return 400 if user does exist.
-    response = get_user_information(username)
+    user_id: str = data['user_id']
+    response = get_user_information(user_id)
     if response['statusCode'] == 200:
-        errorMsg: str = f"User {username} information already exists. Did you mean to update?"
+        errorMsg: str = f"User {user_id} information already exists. Did you mean to update?"
         body = { 'errorMsg': errorMsg }
         return buildResponse(statusCode = 400, body = body)
 
@@ -594,20 +570,72 @@ def add_user_information(username: str, data: dict):
     # If here, put action succeeded. Return 201
     return buildResponse(statusCode = 201, body = {})
 
-def update_user_information(username: str, data: dict):
+def get_user_information(user_id: str):
+    """
+    Gets all of the information for the specified user.
+
+    :params user_id: The name of the user.
+    """
+
+    table = dynamodb.Table(user_table_name)
+    response = table.get_item(
+            Key={ 'user_id': user_id }
+    )
+
+    # user_id doesn't exist if 'Item' not in response
+    if 'Item' not in response:
+        errorMsg: str = f"No information for the user {user_id} could be found. Is there a typo?"
+        body = { 'errorMsg': errorMsg }
+        return buildResponse(statusCode = 400, body = body)
+
+    user = response['Item']
+
+    # FIXME: For debugging purposes right now. Worth keeping?
+    logger.info(f"\nUser:\n{user}")
+
+    return buildResponse(statusCode = 200, body = user)
+
+def patch_user_information(user_id: str, data: dict):
     """
     Updates an existing user's information. Fails if the user does not exist.
 
-    :params username: The name of the user.
+    :params user_id: The name of the user.
     :params data: The updated user information.
     """
-    return buildResponse(statusCode = 200, body = {})
 
-def delete_user_information(username: str):
+    table = dynamodb.Table(user_table_name)
+    status_fields: list[str] = ["undergraduate_class"]
+
+    # Ensure an entry to update actually exists
+    response = get_user_information(user_id)
+    if response['statusCode'] != 200:
+        errorMsg: str = f"User {user_id} could not be found. Did you mean to add the user?"
+        body = { 'errorMsg': errorMsg }
+        return buildResponse(statusCode = 400, body = body)
+
+    else:
+        user = response['body']
+
+    # Make sure the data contains the same user_id as the path user_id
+    if 'user_id' in data and data['user_id'] != user_id:
+        errorMsg: str = f"Path parameter user_id and request body user_id don't match."
+        body = { 'errorMsg': errorMsg }
+        return buildResponse(statusCode = 400, body = body)
+
+    if 'university_status' in data and data['university_status'] == "Undergraduate":
+        if not allKeysPresent(status_fields, data):
+            errorMsg: str = f"Missing at least one field from {status_fields} in requestBody."
+            body = { 'errorMsg': errorMsg }
+            return buildResponse(statusCode = 400, body = body)
+
+    # Successfully updated user
+    return buildResponse(statusCode = 202, body = {})
+
+def delete_user_information(user_id: str):
     """
     Deletes all of a user's information from the user information table.
 
-    :params username: The name of the user.
+    :params user_id: The name of the user.
     """
     return buildResponse(statusCode = 200, body = {})
 
@@ -633,7 +661,7 @@ def get_all_visit_information(query_parameters: dict):
 
         try:
             key_expression = Key('_ignore').eq("1") & timestamp_expression
-            items = queryByKeyExpression(table, key_expression, GSI = '_ignore-timestamp-index')
+            items = queryByKeyExpression(table, key_expression, GSI = TIMESTAMP_INDEX)
 
         except Exception as e:
             logger.info(e)
@@ -643,10 +671,10 @@ def get_all_visit_information(query_parameters: dict):
         # Do a second lookup for all returned items to get the rest of the data
         visits = []
         for item in items:
-            username = item['username']
+            user_id = item['user_id']
 
             response = table.get_item(
-                Key={ 'username': username }
+                Key={ 'user_id': user_id }
             )
 
             visits.append(response['Item'])
@@ -660,55 +688,33 @@ def get_all_visit_information(query_parameters: dict):
 
     return buildResponse(statusCode = 200, body = body)
 
-def get_user_visit_information(username: str, query_parameters: dict):
-    """
-    Gets all of the visit information entries for a specified user from the visit information table.
-
-    :params username: The name of the user.
-    :params query_parameters: A dictionary of parameter names and values to filter by.
-    """
-    table = dynamodb.Table(visit_table_name)
-    if query_parameters:
-        try:
-            timestamp_expression = buildTimestampKeyExpression(query_parameters, 'timestamp')
-
-        except InvalidQueryParameters as iqp:
-            body = { 'errorMsg': str(iqp) }
-            return buildResponse(statusCode = 400, body = body)
-
-        try:
-            key_expression = Key('username').eq(username) & timestamp_expression
-            visits = queryByKeyExpression(table, key_expression)
-
-        except Exception as e:
-            logger.info(e)
-            body = { 'errorMsg': "Something went wrong on the server." }
-            return buildResponse(statusCode = 500, body = body)
-
-    else:
-        key_expression = Key('username').eq(username)
-        visits = queryByKeyExpression(table, key_expression)
-
-    body = { 'visits': visits }
-    # FIXME: For debugging purposes right now. Worth keeping?
-    logger.info(f"\nVisits:\n{body}")
-
-    return buildResponse(statusCode = 200, body = body)
-
-def add_user_visit_information(username: str, data: dict):
+def create_user_visit_information(data: dict):
     """
     Adds a new visit entry for a user to the visit information table.
 
-    :params username: The name of the user.
     :params data: The visit entry to add.
     """
 
     table = dynamodb.Table(visit_table_name)
 
     try:
-        validateVisitRequestBody(username, data)
+        validateCreateVisitRequestBody(data)
     except InvalidRequestBody as irb:
         body = { 'errorMsg': str(irb) }
+        return buildResponse(statusCode = 400, body = body)
+
+    # Ensure no other entry with same user_id and timestamp already exists
+    user_id: str = data['user_id']
+    timestamp: str = data['timestamp']
+    response = table.get_item(
+        Key={
+            'user_id': user_id,
+            'timestamp': timestamp,
+        }
+    )
+    if 'Item' in response:
+        errorMsg: str = f"Visit entry for user {user_id} at timestamp {timestamp} already exists. Did you mean to input a different user or timestamp?"
+        body = { 'errorMsg': errorMsg}
         return buildResponse(statusCode = 400, body = body)
 
     # Always force "_ignore" key to have value of "1"
@@ -726,6 +732,41 @@ def add_user_visit_information(username: str, data: dict):
 
     # If here, put action succeeded. Return 201
     return buildResponse(statusCode = 201, body = {})
+
+def get_user_visit_information(user_id: str, query_parameters: dict):
+    """
+    Gets all of the visit information entries for a specified user from the visit information table.
+
+    :params user_id: The name of the user.
+    :params query_parameters: A dictionary of parameter names and values to filter by.
+    """
+    table = dynamodb.Table(visit_table_name)
+    if query_parameters:
+        try:
+            timestamp_expression = buildTimestampKeyExpression(query_parameters, 'timestamp')
+
+        except InvalidQueryParameters as iqp:
+            body = { 'errorMsg': str(iqp) }
+            return buildResponse(statusCode = 400, body = body)
+
+        try:
+            key_expression = Key('user_id').eq(user_id) & timestamp_expression
+            visits = queryByKeyExpression(table, key_expression)
+
+        except Exception as e:
+            logger.info(e)
+            body = { 'errorMsg': "Something went wrong on the server." }
+            return buildResponse(statusCode = 500, body = body)
+
+    else:
+        key_expression = Key('user_id').eq(user_id)
+        visits = queryByKeyExpression(table, key_expression)
+
+    body = { 'visits': visits }
+    # FIXME: For debugging purposes right now. Worth keeping?
+    logger.info(f"\nVisits:\n{body}")
+
+    return buildResponse(statusCode = 200, body = body)
 
 
 #################################################
@@ -748,7 +789,7 @@ def get_all_equipment_usage_information(query_parameters: dict):
 
         try:
             key_expression = Key('_ignore').eq("1") & timestamp_expression
-            items = queryByKeyExpression(table, key_expression, GSI = 'TimestampIndex')
+            items = queryByKeyExpression(table, key_expression, GSI = TIMESTAMP_INDEX)
 
         except Exception as e:
             logger.info(e)
@@ -758,10 +799,10 @@ def get_all_equipment_usage_information(query_parameters: dict):
         # Do a second lookup for all returned items to get the rest of the data
         equipment_logs = []
         for item in items:
-            username = item['username']
+            user_id = item['user_id']
 
             response = table.get_item(
-                Key={ 'username': username }
+                Key={ 'user_id': user_id }
             )
 
             equipment_logs.append(response['Item'])
@@ -775,55 +816,34 @@ def get_all_equipment_usage_information(query_parameters: dict):
 
     return buildResponse(statusCode = 200, body = body)
 
-def get_user_equipment_usage(username: str, query_parameters: dict):
-    """
-    Gets all of the equipment usage objects for a specified user from the equipment usage table.
-
-    :params username: The name of the user.
-    :params query_parameters: A dictionary of parameter names and values to filter by.
-    """
-    table = dynamodb.Table(equipment_table_name)
-    if query_parameters:
-        try:
-            timestamp_expression = buildTimestampKeyExpression(query_parameters, 'timestamp')
-
-        except InvalidQueryParameters as iqp:
-            body = { 'errorMsg': str(iqp) }
-            return buildResponse(statusCode = 400, body = body)
-
-        try:
-            key_expression = Key('username').eq(username) & timestamp_expression
-            equipment_logs = queryByKeyExpression(table, key_expression)
-
-        except Exception as e:
-            logger.info(e)
-            body = { 'errorMsg': "Something went wrong on the server." }
-            return buildResponse(statusCode = 500, body = body)
-
-    else:
-        key_expression = Key('username').eq(username)
-        equipment_logs = queryByKeyExpression(table, key_expression)
-
-    body = { 'equipment_logs': equipment_logs }
-    # FIXME: For debugging purposes right now. Worth keeping?
-    logger.info(f"\nequipment_logs:\n{body}")
-
-    return buildResponse(statusCode = 200, body = body)
-
-def add_user_equipment_usage(username: str, data: dict):
+def create_user_equipment_usage(data: dict):
     """
     Adds an equipment usage entry for a specified user to the equipment usage table.
 
-    :params username: The name of the user.
+    :params user_id: The name of the user.
     :params data: The equipment usage entry to store.
     """
 
     table = dynamodb.Table(equipment_table_name)
 
     try:
-        validateEquipmentRequestBody(username, data)
+        validateCreateEquipmentRequestBody(data)
     except InvalidRequestBody as irb:
         body = { 'errorMsg': str(irb) }
+        return buildResponse(statusCode = 400, body = body)
+
+    # Ensure no other entry with same user_id and timestamp already exists
+    user_id: str = data['user_id']
+    timestamp: str = data['timestamp']
+    response = table.get_item(
+        Key={
+            'user_id': user_id,
+            'timestamp': timestamp,
+        }
+    )
+    if 'Item' in response:
+        errorMsg: str = f"Equipment usage entry for user {user_id} at timestamp {timestamp} already exists. Did you mean to input a different user or timestamp?"
+        body = { 'errorMsg': errorMsg}
         return buildResponse(statusCode = 400, body = body)
 
     # Always force "_ignore" key to have value of "1"
@@ -842,12 +862,47 @@ def add_user_equipment_usage(username: str, data: dict):
     # If here, put action succeeded. Return 201
     return buildResponse(statusCode = 201, body = {})
 
-def update_user_equipment_usage(username: str, data: dict):
+def get_user_equipment_usage(user_id: str, query_parameters: dict):
+    """
+    Gets all of the equipment usage objects for a specified user from the equipment usage table.
+
+    :params user_id: The name of the user.
+    :params query_parameters: A dictionary of parameter names and values to filter by.
+    """
+    table = dynamodb.Table(equipment_table_name)
+    if query_parameters:
+        try:
+            timestamp_expression = buildTimestampKeyExpression(query_parameters, 'timestamp')
+
+        except InvalidQueryParameters as iqp:
+            body = { 'errorMsg': str(iqp) }
+            return buildResponse(statusCode = 400, body = body)
+
+        try:
+            key_expression = Key('user_id').eq(user_id) & timestamp_expression
+            equipment_logs = queryByKeyExpression(table, key_expression)
+
+        except Exception as e:
+            logger.info(e)
+            body = { 'errorMsg': "Something went wrong on the server." }
+            return buildResponse(statusCode = 500, body = body)
+
+    else:
+        key_expression = Key('user_id').eq(user_id)
+        equipment_logs = queryByKeyExpression(table, key_expression)
+
+    body = { 'equipment_logs': equipment_logs }
+    # FIXME: For debugging purposes right now. Worth keeping?
+    logger.info(f"\nequipment_logs:\n{body}")
+
+    return buildResponse(statusCode = 200, body = body)
+
+def patch_user_equipment_usage(user_id: str, data: dict):
     """
     Updates an equipment usage entry for a specified user. Fails if no entry with a
-    corresponding username and timetamp exists.
+    corresponding user_id and timetamp exists.
 
-    :params username: The name of the user.
+    :params user_id: The name of the user.
     :params data: The updated equipment usage entry.
     """
     return buildResponse(statusCode = 200, body = {})
@@ -874,7 +929,7 @@ def get_all_qualifications_information(query_parameters: dict):
         # Query for matching qualifcation entries
         try:
             key_expression = Key('_ignore').eq("1") & timestamp_expression
-            items = queryByKeyExpression(table, key_expression, GSI = 'TimestampIndex')
+            items = queryByKeyExpression(table, key_expression, GSI = TIMESTAMP_INDEX)
 
         except Exception as e:
             logger.info(e)
@@ -884,10 +939,10 @@ def get_all_qualifications_information(query_parameters: dict):
         # Do a second lookup for all returned items to get the rest of the data
         qualifications = []
         for item in items:
-            username = item['username']
+            user_id = item['user_id']
 
             response = table.get_item(
-                Key={ 'username': username }
+                Key={ 'user_id': user_id }
             )
 
             qualifications.append(response['Item'])
@@ -901,51 +956,32 @@ def get_all_qualifications_information(query_parameters: dict):
 
     return buildResponse(statusCode = 200, body = body)
 
-def get_user_qualifications(username: str):
-    """
-    Gets the qualifications information entry for a specified user from the qualifications table.
-
-    :params username: The name of the user.
-    """
-
-    table = dynamodb.Table(qualifications_table_name)
-
-    response = table.get_item(
-            Key={ 'username': username }
-    )
-
-    # User qualifications doesn't exist if 'Item' not in response
-    if 'Item' not in response:
-        errorMsg: str = f"No qualificationsfor the user {username} could be found. Is there a typo?"
-        body = { 'errorMsg': errorMsg }
-        return buildResponse(statusCode = 400, body = body)
-
-    qualifications = response['Item']
-
-    # FIXME: For debugging purposes right now. Worth keeping?
-    logger.info(f"\n{username} Qualifications:\n{qualifications}")
-
-    return buildResponse(statusCode = 200, body = qualifications)
-
-def add_user_qualifications(username: str, data: dict):
+def create_user_qualifications(data: dict):
     """
     Adds a qualifications information entry for a specified user to the qualifications table.
 
-    :params username: The name of the user.
+    :params user_id: The name of the user.
     :params data: The qualifications information entry to add.
     """
 
     table = dynamodb.Table(qualifications_table_name)
 
     try:
-        validateQualificationRequestBody(username, data)
+        validateCreateQualificationRequestBody(data)
     except InvalidRequestBody as irb:
         body = { 'errorMsg': str(irb) }
         return buildResponse(statusCode = 400, body = body)
 
-    # If 'last_updated' not in data, stored the formatted current time
-    if 'last_updated' not in data:
-        data['last_updated'] = datetime.now().strftime(TIMESTAMP_FORMAT)
+    # Check to make sure the user doesn't already exist. Return 400 if user does exist.
+    user_id: str = data['user_id']
+    response = get_user_qualifications(user_id)
+    if response['statusCode'] == 200:
+        errorMsg: str = f"User {user_id} qualifications already exist. Did you mean to update?"
+        body = { 'errorMsg': errorMsg }
+        return buildResponse(statusCode = 400, body = body)
+
+    # Store the formatted current time in data['last_updated']
+    data['last_updated'] = datetime.now().strftime(TIMESTAMP_FORMAT)
 
     # If 'trainings' not in data, store an empty list
     if 'trainings' not in data:
@@ -956,13 +992,6 @@ def add_user_qualifications(username: str, data: dict):
         data['waivers'] = []
     # Always force "_ignore" key to have value of "1"
     data['_ignore'] = "1"
-
-    # Check to make sure the user doesn't already exist. Return 400 if user does exist.
-    response = get_user_qualifications(username)
-    if response['statusCode'] == 200:
-        errorMsg: str = f"User {username} qualifications already exist. Did you mean to update?"
-        body = { 'errorMsg': errorMsg }
-        return buildResponse(statusCode = 400, body = body)
 
     # Actually try putting the item into the table
     try:
@@ -977,12 +1006,48 @@ def add_user_qualifications(username: str, data: dict):
     # If here, put action succeeded. Return 201
     return buildResponse(statusCode = 201, body = {})
 
-def update_user_qualifications(username: str, data: dict):
+def get_user_qualifications(user_id: str):
+    """
+    Gets the qualifications information entry for a specified user from the qualifications table.
+
+    :params user_id: The name of the user.
+    """
+
+    table = dynamodb.Table(qualifications_table_name)
+
+    logger.info(f"\n????\n{user_id}")
+
+    """
+    Query the table (because get_item doesn't play nice without specifying sort key).
+    Limit the results to 1 since we are enforcing 1 qualifications entry per user.
+    If an item already exists, this will return an "array" of 1 item in the 'Items'
+    key. For these purposes, ['Items'][0] is equivalent to retrieving the desired
+    user's qualifications.
+    """
+    response = table.query(
+            KeyConditionExpression=Key('user_id').eq(user_id),
+            Limit=1
+    )
+
+    # User qualifications doesn't exist if length of response['Items'] == 0
+    if len(response['Items']) == 0:
+        errorMsg: str = f"No qualificationsfor the user {user_id} could be found. Is there a typo?"
+        body = { 'errorMsg': errorMsg }
+        return buildResponse(statusCode = 400, body = body)
+
+    qualifications = response['Items'][0]
+
+    # FIXME: For debugging purposes right now. Worth keeping?
+    logger.info(f"\n{user_id} Qualifications:\n{qualifications}")
+
+    return buildResponse(statusCode = 200, body = qualifications)
+
+def patch_user_qualifications(user_id: str, data: dict):
     """
     Updates the qualifications information entry for a specified user. Fails if the a
     qualifications entry does not exist for the user.
 
-    :params username: The name of the user.
+    :params user_id: The name of the user.
     :params data: The updated qualifications information entry.
     """
     return buildResponse(statusCode = 200, body = {})
