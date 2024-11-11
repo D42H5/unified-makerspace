@@ -94,23 +94,6 @@ paths:
         passthroughBehavior: when_no_match
         timeoutInMillis: 29000
 
-    delete:
-      summary: Delete user data
-      parameters:
-        - $ref: '#/components/parameters/UserID'
-      responses:
-        200:
-          description: OK
-        400:
-          $ref: '#/components/responses/BadRequest'
-      x-amazon-apigateway-integration:
-        type: aws_proxy
-        httpMethod: POST
-        uri: arn:aws:apigateway:us-east-1:lambda:path/2015-03-31/functions/arn:aws:lambda:us-east-1:944207523762:function:beta-api-handler/invocations
-        payloadFormatVersion: "1.0"
-        passthroughBehavior: when_no_match
-        timeoutInMillis: 29000
-
 
   /visits:
     get:
@@ -157,6 +140,7 @@ paths:
         - $ref: '#/components/parameters/UserID'
         - $ref: '#/components/parameters/StartTimestamp'
         - $ref: '#/components/parameters/EndTimestamp'
+        - $ref: '#/components/parameters/Limit'
       responses:
         200:
           description: OK
@@ -215,11 +199,12 @@ paths:
 
   /equipment/{user_id}:
     get:
-      summary: Retrieve all equipment usage data for a specific user
+      summary: Retrieve all equipment usage data for a specific user.
       parameters:
         - $ref: '#/components/parameters/UserID'
         - $ref: '#/components/parameters/StartTimestamp'
         - $ref: '#/components/parameters/EndTimestamp'
+        - $ref: '#/components/parameters/Limit'
       responses:
         200:
           description: OK
@@ -238,7 +223,7 @@ paths:
         timeoutInMillis: 29000
 
     patch:
-      summary: Update data in an existing equipment usage data entry
+      summary: Update data in an existing equipment usage data entry. Specify the timestamp field to get a specific entry, or leave it blank to get the data entry with the latest timestamp.
       parameters:
         - $ref: '#/components/parameters/UserID'
       requestBody:
@@ -363,7 +348,7 @@ components:
         - "Cooper"
         - "CUICAR"
 
-    completeableItem:
+    completableItem:
       description: An object containing the name of a completable item (e.g., training or waiver) and the current completion status.
       type: object
       properties:
@@ -428,6 +413,12 @@ components:
         print_notes:
           description: Notes about the print.
           type: string
+      required:
+        - printer_name
+        - print_duration
+        - print_mass
+        - print_mass_estimate
+        - print_status
 
     major:
       description: A major an undergraduate can study.
@@ -630,6 +621,8 @@ components:
         - required:
           - major
           - undergraduate_class
+        - required:
+          - major
 
     UserID:
       type: object
@@ -683,7 +676,7 @@ components:
             $ref: '#/components/schemas/Visit'
 
     EquipmentUsageProperties:
-      description: An object containing equipment usage data. If the project type is "class", the class_number, faculty_name, and project_sponsor fields are required. If the project type is club, the organization_affiliation field is required. If the equipment type is "3D Printer", then the 3d_printer_info field is required.
+      description: An object containing equipment usage data. If the project type is "class", the class_number, faculty_name, and project_sponsor fields are required. If the project type is club, the organization_affiliation field is required. If the equipment type is "FDM 3D Printer" or "SLA Printer", then the 3d_printer_info field is required.
       type: object
       properties:
         timestamp:
@@ -711,7 +704,18 @@ components:
           minLength: 1
         equipment_type:
           type: string
-          enum: ["3D Printer", "Laser Engraver"]
+          enum:
+            - "FDM 3D Printer"
+            - "Laser Engraver"
+            - "Glowforge"
+            - "SLA Printer"
+            - "Fabric Printer"
+            - "Vinyl Cutter"
+            - "Button Maker"
+            - "3D Scanner"
+            - "Hand Tools"
+            - "Sticker Printer"
+            - "Embroidery Machine"
         3d_printer_info:
           $ref: '#/components/schemas/3dPrinterInfo'
   
@@ -759,16 +763,18 @@ components:
           description: An array of training courses and the user’s completion status of them.
           type: array
           items:
-            $ref: '#/components/schemas/completeableItem'
+            $ref: '#/components/schemas/completableItem'
         waivers:
           description: An array of waivers and the user’s completion status of them.
           type: array
           items:
-            $ref: '#/components/schemas/completeableItem'
+            $ref: '#/components/schemas/completableItem'
 
     QualificationsRequiredProperties:
       required:
         - user_id
+        - trainings
+        - waivers
 
     Qualification:
       allOf:
@@ -808,6 +814,13 @@ components:
       schema:
         $ref: '#/components/schemas/timestamp'
 
+    Limit:
+      name: limit
+      in: query
+      description: The number of results to limit a query to.
+      schema:
+        type: integer
+        minimum: 1
 
   requestBodies:
     CreateUser:

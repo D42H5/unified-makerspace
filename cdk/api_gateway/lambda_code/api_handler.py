@@ -1,18 +1,8 @@
-"""
-TODO
-***
-- PUT -> POST
-- Split current request body validators into collections of individual checks that can be explicitly called. Should allow for more robust request body validation of any kind (e.g., post and update).
-- PATCH actually implemented
-***
-- Delete actually implemented
-- Manually generate timestamp for equipment and qualifications. Visit timestamp should still be given in request body.
-"""
 import boto3
 from boto3.dynamodb.conditions import Key, Attr
 import json
-import logging
 from datetime import datetime
+from dataclasses import dataclass
 
 class InvalidQueryParameters(BaseException):
     """
@@ -48,9 +38,14 @@ class InvalidRequestBody(BaseException):
         # Initialize exception with args
         super().__init__(*args)
 
-# Set up logging
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
+@dataclass
+class FieldCheck():
+    """
+    Class to be used when checking fields for a key. Comprised of string lists of
+    'required' and 'disallowed' fields.
+    """
+    required: list[str]
+    disallowed: list[str]
 
 # Initialize the DynamoDB client using boto3
 dynamodb = boto3.resource('dynamodb', region_name='us-east-1')
@@ -73,16 +68,21 @@ qualifications_path: str = "/qualifications"
 qualifications_param_path: str = qualifications_path + user_endpoint
 
 # Other global values
-SCAN_LIMIT: int = 1000
+DEFAULT_SCAN_LIMIT: int = 1000
+DEFAULT_QUERY_LIMIT: int = 1000
 TIMESTAMP_FORMAT: str = "%Y-%m-%dT%H:%M:%S"
 TIMESTAMP_INDEX: str = "TimestampIndex"
+VALID_LOCATIONS: list[str] = ["Watt", "Cooper", "CUICAR"]
+VALID_QUERY_PARAMETERS: list[str] = [
+    "start_timestamp",
+    "end_timestamp",
+    "limit"
+]
+INT_QUERY_PARAMETERS: list[str] = ["limit"]
 
 # Main handler function
 def handler(event, context):
     try:
-        logger.info(f"\nRequest event method: {event.get("httpMethod")}")
-        logger.info(f"\nEVENT\n{json.dumps(event, indent=2)}")
-
         method_requires_body: list = ["POST", "PATCH"]
 
         response = buildResponse(statusCode = 400, body = {})
@@ -112,17 +112,15 @@ def handler(event, context):
         # Try to get any query parameters
         try:
             query_parameters: dict = event['queryStringParameters']
+
+            # Remove unknown query parameters
+            for key in query_parameters:
+                if key not in VALID_QUERY_PARAMETERS:
+                    del query_parameters[key]
+                if key in INT_QUERY_PARAMETERS:
+                    query_parameters[key] = int(query_parameters[key])
         except:
             query_parameters: dict = {}
-
-        # FIXME: For debugging purposes right now. Worth keeping?
-        logger.info(f"\nLOCAL VARS:\n"
-                    +f"http_method: {http_method}\n"
-                    +f"resource_path: {resource_path}\n"
-                    +f"user_id: {user_id}\n"
-                    +f"data: {data}\n"
-                    +f"query_parameters: {query_parameters}\n"
-        )
 
         # User information request handling
         if http_method == "GET" and resource_path == users_path:
@@ -134,8 +132,6 @@ def handler(event, context):
             response = get_user_information(user_id)
         elif http_method == "PATCH" and resource_path == users_param_path:
             response = patch_user_information(user_id, data)
-        elif http_method == "DELETE" and resource_path == users_param_path:
-            response = delete_user_information(user_id)
 
 
         # Visit information request handling
@@ -172,14 +168,11 @@ def handler(event, context):
             response = patch_user_qualifications(user_id, data)
 
 
-        # FIXME: For debugging purposes right now. Worth keeping?
-        logger.info(f"\nFINAL RESPONSE:\n{response}")
         return response
-    except Exception as e:
-        logger.info(e)
-        errorMsg: str = f"{str(e)}"
+    except:
+        errorMsg: str = f"We're sorry, but something happened. Try again later."
         body = { 'errorMsg': errorMsg }
-        return buildResponse(statusCode = 599, body = body)
+        return buildResponse(statusCode = 500, body = body)
 
 ####################
 # Helper functions #
@@ -237,6 +230,9 @@ def buildTimestampKeyExpression(query_parameters: dict, timestamp_attr_name: str
     elif start_timestamp and not end_timestamp:
         expression = Key(timestamp_attr_name).gte(start_timestamp)
 
+    elif start_timestamp == end_timestamp:
+        expression = Key(timestamp_attr_name).eq(start_timestamp)
+
     else:
         # Can't have the end_timestamp occur before the start_timestamp
         if str(end_timestamp) < str(start_timestamp):
@@ -246,7 +242,7 @@ def buildTimestampKeyExpression(query_parameters: dict, timestamp_attr_name: str
 
     return expression
 
-def queryByKeyExpression(table, key_expression, GSI = None) -> list:
+def queryByKeyExpression(table, key_expression, GSI = None, limit = DEFAULT_QUERY_LIMIT) -> list:
     """
     Queries a given table for all entries that match the provided key
     expression. When desiring to search by timestamp, table is required
@@ -276,8 +272,6 @@ def queryByKeyExpression(table, key_expression, GSI = None) -> list:
     stop exceeding response limit.
     """
 
-    # TODO: Put params into an args tuple and call *args in .scan()
-
     # The list that will store all matching query items
     items: list = []
     try:
@@ -297,9 +291,9 @@ def queryByKeyExpression(table, key_expression, GSI = None) -> list:
 
         """
         Query until "LastEvaluatedKey" isn't in response (all appropriate keys
-        where checked)
+        where checked) or until the length of items >= limit
         """
-        while "LastEvaluatedKey" in response:
+        while "LastEvaluatedKey" in response and len(items) < limit:
             if GSI != None:
                 response = table.query(
                     IndexName=GSI,
@@ -318,7 +312,7 @@ def queryByKeyExpression(table, key_expression, GSI = None) -> list:
         # Don't log since this function's errors should be handled by caller
         raise Exception(e)
 
-    return items
+    return items[0:limit]
 
 def scanTable(table, filter_expression = None) -> list:
     """
@@ -334,7 +328,6 @@ def scanTable(table, filter_expression = None) -> list:
     # List to store returned items
     items: list = []
 
-    # TODO: Put Filter/Limit into an args tuple and call *args in .scan()
     """
     Scan at least once, then keep scanning until either no more
     items are returned or the end of the table is reached.
@@ -343,29 +336,28 @@ def scanTable(table, filter_expression = None) -> list:
         if not filter_expression == None:
             response = table.scan(
                 FilterExpression=filter_expression,
-                Limit=SCAN_LIMIT
+                Limit=DEFAULT_SCAN_LIMIT
             )
 
         else:
             response = table.scan(
-                Limit=SCAN_LIMIT
+                Limit=DEFAULT_SCAN_LIMIT
             )
 
         items += (response['Items'])
-        logger.info(f"\nTable returned:\n{response}")
 
         # Keep scanning for more items until no more return
         while 'Items' in response and 'LastEvaluatedKey' in response:
             if not filter_expression == None:
                 response = table.scan(
                     FilterExpression=filter_expression,
-                    Limit=SCAN_LIMIT,
+                    Limit=DEFAULT_SCAN_LIMIT,
                     ExclusiveStartKey=response['LastEvaluatedKey']
                 )
 
             else:
                 response = table.scan(
-                    Limit=SCAN_LIMIT,
+                    Limit=DEFAULT_SCAN_LIMIT,
                     ExclusiveStartKey=response['LastEvaluatedKey']
                 )
 
@@ -375,7 +367,6 @@ def scanTable(table, filter_expression = None) -> list:
         pass
 
     except Exception as e:
-        logger.info(e)
         raise e
 
     return items
@@ -394,31 +385,113 @@ def allKeysPresent(keys: list[str], data: dict) -> bool:
             return False
     return True
 
-def validateCreateUserRequestBody(data: dict):
+def anyKeysPresent(keys: list[str], data: dict) -> bool:
+    """
+    Checks if any strings in a list are in a dictionary.
+
+    :params keys: A list of strings to check as keys for the dictionary.
+    :params data: The dictionary to check the keys against.
+    :returns: True if at leasy one key is present, false if all keys are not present.
+    """
+
+    for key in keys:
+        if key in data:
+            return True
+    return False
+
+def checkAndCleanRequestFields(data: dict, field_check):
+    """
+    Checks a request body for required and disallowed fields.
+    Raises an InvalidRequestBody if a required field is missing,
+    and deletes any found disallowed fields.
+
+    :params data: The request body to check.
+    :params field_check: A FieldCheck object with the required
+                         and disallowed fields.
+    :returns: A copy of the inputted request body, but with
+              disallowed fields removed.
+    :raises: InvalidRequestBody
+    """
+
+    # Required field check
+    for required_field in field_check.required:
+        if required_field not in data:
+            errorMsg: str = f"Missing at least one field from {field_check.required}."
+            raise InvalidRequestBody(errorMsg)
+
+    # Delete disallowed keys
+    for disallowed_field in field_check.disallowed:
+        try:
+            del data[disallowed_field]
+        except KeyError:
+            pass
+    
+    return data
+
+def validateUserRequestBody(data: dict):
     """
     Valides the request body used when creating a user information entry.
+    Removes any unnecessary keys and values from the request body.
     Will raise an InvalidRequestBody error with the details explaining
     what part of the body is invalid.
 
     :params data: The request body to validate.
+    :returns: A valid user request body.
     :raises: InvalidRequestBody
     """
 
     required_fields: list[str] = ["user_id", "university_status"]
-    status_fields: list[str] = ["undergraduate_class"]
+
+    # Define required and disallowed fields for checking
+    undergrad_fields = FieldCheck(required = ["undergraduate_class", "major"],
+                                  disallowed = []
+    )
+
+    grad_fields = FieldCheck(required = ["major"],
+                             disallowed = ["undergraduate_class"]
+    )
+
+    faculty_fields = FieldCheck(required = [],
+                                disallowed = ["undergraduate_class", "major"]
+    )
+
+    fields_lookup: dict = {
+        'Undergraduate': undergrad_fields,
+        'Graduate': grad_fields,
+        'Faculty': faculty_fields,
+    }
+
+    valid_undergraduate_classes: list[str] = ["Freshman", "Sophomore", "Junior", "Senior"]
 
     # Ensure all required fields are present
     if not allKeysPresent(required_fields, data):
-        errorMsg: str = f"Missing at least one field from {required_fields} in requestBody."
+        errorMsg: str = f"Missing at least one field from {required_fields} in request body."
         raise InvalidRequestBody(errorMsg)
 
-    # Ensure all status fields are present if data['university_status'] == "Undergraduate"
-    if data['university_status'] == "Undergraduate":
-        if not allKeysPresent(status_fields, data):
-            errorMsg: str = f"Missing at least one field from {status_fields} in requestBody."
-            raise InvalidRequestBody(errorMsg)
+    # Error if university_status is not one of the defined ones
+    university_status: str = data['university_status']
+    if university_status not in fields_lookup:
+        valid_statuses: list[str] = [key for key in fields_lookup]
+        errorMsg: str = f"The provided university_status ('{university_status}') is not one of the valid statuses ({valid_statuses})."
+        raise InvalidRequestBody(errorMsg)
 
-def validateCreateVisitRequestBody(data: dict):
+    # Check for and clean fields related to 'university_status'
+    checking_fields = fields_lookup[university_status]
+    try:
+        data = checkAndCleanRequestFields(data, checking_fields)
+    except InvalidRequestBody:
+        # Re-raise InvalidRequestBody if the exception occurs
+        errorMsg: str = f"Missing at least one field from {checking_fields.required} due to a 'university_status' value of '{university_status}' in request body."
+        raise InvalidRequestBody(errorMsg)
+    
+    # Check that the undergraduate class is valid if it's still in data
+    if 'undergraduate_class' in data:
+        if data['undergraduate_class'] not in valid_undergraduate_classes:
+            errorMsg: str = f"Specified undergraduate_class ('{data['undergraduate_class']}') is not one of the valid classes {valid_undergraduate_classes} in request body."
+            raise InvalidRequestBody(errorMsg)
+    return data
+
+def validateVisitRequestBody(data: dict):
     """
     Valides the request body used when adding/updating user information.
     Will raise an InvalidRequestBody error with the details explaining
@@ -432,7 +505,7 @@ def validateCreateVisitRequestBody(data: dict):
 
     # Ensure all required fields are present
     if not allKeysPresent(required_fields, data):
-        errorMsg: str = f"Missing at least one field from {required_fields} in requestBody."
+        errorMsg: str = f"Missing at least one field from {required_fields} in request body."
         raise InvalidRequestBody(errorMsg)
 
     # Ensure timestamp is in the correct format
@@ -442,53 +515,130 @@ def validateCreateVisitRequestBody(data: dict):
         errorMsg: str = f"Timestamp not in the approved format. Approved format is 'YYYY-MM-DDThh:mm:ss'."
         raise InvalidRequestBody(errorMsg)
 
-def validateCreateEquipmentRequestBody(data: dict):
+    # Check that the location is valid if it's still in data
+    if 'location' in data:
+        if data['location'] not in VALID_LOCATIONS:
+            errorMsg: str = f"Specified location '{data['location']} is not one of the valid locations {VALID_LOCATIONS}'."
+            raise InvalidRequestBody(errorMsg)
+
+def validateEquipmentRequestBody(data: dict):
     """
-    Valides the request body used when adding/updating user information.
+    Valides the request body used when adding/updating equipment information.
+    Removes any unnecessary keys and values from the request body.
     Will raise an InvalidRequestBody error with the details explaining
     what part of the body is invalid.
 
     :params data: The request body to validate.
+    :returns: A valid equipment request body.
     :raises: InvalidRequestBody
     """
 
     required_fields: list[str] = ["user_id", "timestamp", "location",
                                   "project_name", "project_type", "equipment_type"]
     
-    class_project_fields: list[str] = ["class_number", "faculty_name", "project_sponsor"]
-    club_project_fields: list[str] = ["organization_affiliation"]
+    # Project Type Fields
+    personal_project_fields = FieldCheck(
+        required = [],
+        disallowed = ["class_number", "faculty_name", "project_sponsor", "organization_affiliation"],
+    )
 
-    equipment_3d_printer_fields: list[str] = ["printer_name", "print_duration",
+    class_project_fields = FieldCheck(
+        required = ["class_number", "faculty_name", "project_sponsor"],
+        disallowed = ["organization_affiliation"]
+    )
+
+    club_project_fields = FieldCheck(
+        required = ["organization_affiliation"],
+        disallowed = ["class_number", "faculty_name", "project_sponsor"]
+    )
+
+    project_type_field_lookup = {
+        'Personal': personal_project_fields,
+        'Class': class_project_fields,
+        'Club': club_project_fields
+    }
+
+    valid_project_types: list[str] = [key for key in project_type_field_lookup]
+
+    # Equipment Type Fields
+    """
+    Due to the lack of data collection from other equipment, the only real
+    required field to check is '3d_printer_info' when the type is 'SLA Printer'
+    or 'FDM 3D Printer'. Otherwise, just make sure that the '3d_printer_info'
+    field is disallowed for all other types. In the future, split equipment
+    type fields into more specificly defined ones as needed.
+    """
+    printer_3d_fields = FieldCheck(
+        required = ["3d_printer_info"],
+        disallowed = []
+    )
+
+    other_equipment_type_fields = FieldCheck(
+        required = [],
+        disallowed = ["3d_printer_info"]
+    )
+
+    equipment_type_field_lookup: dict = {
+        "FDM 3D Printer": printer_3d_fields, 
+        "SLA Printer": printer_3d_fields, 
+        "Laser Engraver": other_equipment_type_fields, 
+        "Glowforge": other_equipment_type_fields, 
+        "Fabric Printer": other_equipment_type_fields, 
+        "Vinyl Cutter": other_equipment_type_fields, 
+        "Button Maker": other_equipment_type_fields, 
+        "3D Scanner": other_equipment_type_fields, 
+        "Hand Tools": other_equipment_type_fields, 
+        "Sticker Printer": other_equipment_type_fields, 
+        "Embroidery Machine": other_equipment_type_fields, 
+    }
+
+    valid_equipment_types: list[str] = [key for key in equipment_type_field_lookup]
+
+    # Used to check contents of '3d_printer_info' object
+    equipment_3d_printer_info_fields: list[str] = ["printer_name", "print_duration",
                                               "print_mass", "print_mass_estimate",
                                               "print_status", "print_notes"]
 
     # Ensure all required fields are present
     if not allKeysPresent(required_fields, data):
-        errorMsg: str = f"Missing at least one field from {required_fields} in requestBody."
+        errorMsg: str = f"Missing at least one field from {required_fields} in request body."
         raise InvalidRequestBody(errorMsg)
 
-    # Project Type field assertion
-    # Ensure all class project fields are present if data["project_type"] == "Class"
-    if data["project_type"] == "Class":
-        if not allKeysPresent(class_project_fields, data):
-            errorMsg: str = f"Missing at least one field from {class_project_fields} in requestBody."
-            raise InvalidRequestBody(errorMsg)
+    # Error if project_type is not one of the defined ones
+    project_type: str = data['project_type']
+    if project_type not in project_type_field_lookup:
+        errorMsg: str = f"project_type {project_type} is not one of the valid project types {valid_project_types}."
+        raise InvalidRequestBody(errorMsg)
 
-    # Ensure all club project fields are present if data["project_type"] == "Club"
-    elif data["project_type"] == "Club":
-        if not allKeysPresent(club_project_fields, data):
-            errorMsg: str = f"Missing at least one field from {club_project_fields} in requestBody."
-            raise InvalidRequestBody(errorMsg)
+    # Error if equipment_type is not one of the defined ones
+    equipment_type: str = data['equipment_type']
+    if equipment_type not in equipment_type_field_lookup:
+        errorMsg: str = f"equipment_type {equipment_type} is not one of the valid equipment types {valid_equipment_types}."
+        raise InvalidRequestBody(errorMsg)
 
-    # Equipment type field assertion
-    # Ensure all 3D Printer fields are present if data["equipment_type"] == "3D Printer"
-    if data["equipment_type"] == "3D Printer":
-        if '3d_printer_info' not in data:
-            errorMsg: str = f"Missing '3d_printer_info' object in requestBody."
-            raise InvalidRequestBody(errorMsg)
+    # Check for and clean fields related to 'project_type'
+    checking_fields = project_type_field_lookup[project_type]
+    try:
+        data = checkAndCleanRequestFields(data, checking_fields)
+    except InvalidRequestBody:
+        # Re-raise InvalidRequestBody if the exception occurs
+        errorMsg: str = f"Missing at least one field from {checking_fields.required} for a project_type value of '{project_type}'."
+        raise InvalidRequestBody(errorMsg)
 
-        if not allKeysPresent(equipment_3d_printer_fields, data['3d_printer_info']):
-            errorMsg: str = f"Missing at least one field from {equipment_3d_printer_fields} in requestBody."
+    # Check for and clean fields related to 'equipment_type'
+    checking_fields = equipment_type_field_lookup[equipment_type]
+    try:
+        data = checkAndCleanRequestFields(data, checking_fields)
+    except InvalidRequestBody:
+        # Re-raise InvalidRequestBody if the exception occurs
+        errorMsg: str = f"Missing at least one field from {checking_fields.required} for a equipment_type value of '{equipment_type}'."
+        raise InvalidRequestBody(errorMsg)
+
+    # Ensure 3d_printer_info object has all required fields if it is in data
+    if '3d_printer_info' in data and not \
+        allKeysPresent(equipment_3d_printer_info_fields, data['3d_printer_info']):
+
+            errorMsg: str = f"Missing at least one field from {equipment_3d_printer_info_fields} in the '3d_printer_info' object in the request body."
             raise InvalidRequestBody(errorMsg)
 
     # Ensure timestamp is in the correct format
@@ -497,24 +647,45 @@ def validateCreateEquipmentRequestBody(data: dict):
     except ValueError:
         errorMsg: str = f"Timestamp not in the approved format. Approved format is 'YYYY-MM-DDThh:mm:ss'."
         raise InvalidRequestBody(errorMsg)
+    
+    return data
 
-def validateCreateQualificationRequestBody(data: dict):
+def validateQualificationRequestBody(data: dict):
     """
     Valides the request body used when adding/updating user information.
+    Removes any unnecessary keys and values from the request body.
     Will raise an InvalidRequestBody error with the details explaining
     what part of the body is invalid.
 
     :params user_id: The name of the user.
     :params data: The request body to validate.
+    :returns: A valid qualifications request body.
     :raises: InvalidRequestBody
     """
 
-    required_fields: list[str] = ["user_id"]
+    required_fields: list[str] = ["user_id", "trainings", "waivers"]
+    completable_item_lists: list[str] = ["trainings", "waivers"]
+    completable_item_fields: list [str] = ["name", "completion_status"]
+    valid_completion_statuses: list[str] = ["Complete", "Incomplete"]
 
     # Ensure all required fields are present
     if not allKeysPresent(required_fields, data):
-        errorMsg: str = f"Missing at least one field from {required_fields} in requestBody."
+        errorMsg: str = f"Missing at least one field from {required_fields} in request body. 'trainings' and 'waivers' can be empty lists."
         raise InvalidRequestBody(errorMsg)
+
+    for completable_list in completable_item_lists:
+        for item in data[completable_list]:
+            if not allKeysPresent(completable_item_fields, item):
+                errorMsg: str = f"Missing at least one field from {completable_item_fields} for at least one completeable item in {completable_list}."
+                raise InvalidRequestBody(errorMsg)
+
+            name = str(item['name'])
+            status = str(item['completion_status'])
+            if status not in valid_completion_statuses:
+                errorMsg: str = f"Completion status '{status}' is not one of the valid completion statuses {valid_completion_statuses} for object with name {name} in {completable_list}."
+                raise InvalidRequestBody(errorMsg)
+
+    return data
 
 
 ######################################
@@ -527,9 +698,6 @@ def get_all_user_information():
 
     table = dynamodb.Table(user_table_name)
     users = scanTable(table)
-
-    # FIXME: For debugging purposes right now. Worth keeping?
-    logger.info(f"\nUsers:\n{users}")
 
     body = { 'users': users }
     return buildResponse(statusCode = 200, body = body)
@@ -544,7 +712,7 @@ def create_user_information(data: dict):
     table = dynamodb.Table(user_table_name)
 
     try:
-        validateCreateUserRequestBody(data)
+        data = validateUserRequestBody(data)
     except InvalidRequestBody as irb:
         body = { 'errorMsg': str(irb) }
         return buildResponse(statusCode = 400, body = body)
@@ -563,7 +731,6 @@ def create_user_information(data: dict):
             Item=data
         )
     except Exception as e:
-        logger.info(e)
         body = { 'errorMsg': "Something went wrong on the server." }
         return buildResponse(statusCode = 500, body = body)
 
@@ -590,9 +757,6 @@ def get_user_information(user_id: str):
 
     user = response['Item']
 
-    # FIXME: For debugging purposes right now. Worth keeping?
-    logger.info(f"\nUser:\n{user}")
-
     return buildResponse(statusCode = 200, body = user)
 
 def patch_user_information(user_id: str, data: dict):
@@ -604,7 +768,6 @@ def patch_user_information(user_id: str, data: dict):
     """
 
     table = dynamodb.Table(user_table_name)
-    status_fields: list[str] = ["undergraduate_class"]
 
     # Ensure an entry to update actually exists
     response = get_user_information(user_id)
@@ -614,30 +777,31 @@ def patch_user_information(user_id: str, data: dict):
         return buildResponse(statusCode = 400, body = body)
 
     else:
-        user = response['body']
+        # Load the json object stored in response['body']
+        user = json.loads(response['body'])
 
-    # Make sure the data contains the same user_id as the path user_id
-    if 'user_id' in data and data['user_id'] != user_id:
-        errorMsg: str = f"Path parameter user_id and request body user_id don't match."
+    # "user_id" field is never allowed for update
+    if 'user_id' in data:
+        errorMsg: str = "Updating the 'user_id' field is not allowed. Please remove it before trying to update user {user_id}'s information."
         body = { 'errorMsg': errorMsg }
         return buildResponse(statusCode = 400, body = body)
 
-    if 'university_status' in data and data['university_status'] == "Undergraduate":
-        if not allKeysPresent(status_fields, data):
-            errorMsg: str = f"Missing at least one field from {status_fields} in requestBody."
-            body = { 'errorMsg': errorMsg }
-            return buildResponse(statusCode = 400, body = body)
+    # Copy all all fields from data to user
+    for key in data:
+        user[key] = data[key]
+    
+    # Validate new item
+    try:
+        user = validateUserRequestBody(user)
+    except InvalidRequestBody as irb:
+        body = { 'errorMsg': str(irb) }
+        return buildResponse(statusCode = 400, body = body)
+
+    # Try putting item back into table
+    table.put_item(Item=user)
 
     # Successfully updated user
-    return buildResponse(statusCode = 202, body = {})
-
-def delete_user_information(user_id: str):
-    """
-    Deletes all of a user's information from the user information table.
-
-    :params user_id: The name of the user.
-    """
-    return buildResponse(statusCode = 200, body = {})
+    return buildResponse(statusCode = 204, body = {})
 
 
 #######################################
@@ -664,7 +828,6 @@ def get_all_visit_information(query_parameters: dict):
             items = queryByKeyExpression(table, key_expression, GSI = TIMESTAMP_INDEX)
 
         except Exception as e:
-            logger.info(e)
             body = { 'errorMsg': "Something went wrong on the server." }
             return buildResponse(statusCode = 500, body = body)
 
@@ -683,8 +846,6 @@ def get_all_visit_information(query_parameters: dict):
         visits = scanTable(table)
 
     body = { 'visits': visits }
-    # FIXME: For debugging purposes right now. Worth keeping?
-    logger.info(f"\nVisits:\n{body}")
 
     return buildResponse(statusCode = 200, body = body)
 
@@ -698,7 +859,7 @@ def create_user_visit_information(data: dict):
     table = dynamodb.Table(visit_table_name)
 
     try:
-        validateCreateVisitRequestBody(data)
+        validateVisitRequestBody(data)
     except InvalidRequestBody as irb:
         body = { 'errorMsg': str(irb) }
         return buildResponse(statusCode = 400, body = body)
@@ -726,7 +887,6 @@ def create_user_visit_information(data: dict):
             Item=data
         )
     except Exception as e:
-        logger.info(e)
         body = { 'errorMsg': "Something went wrong on the server." }
         return buildResponse(statusCode = 500, body = body)
 
@@ -740,7 +900,16 @@ def get_user_visit_information(user_id: str, query_parameters: dict):
     :params user_id: The name of the user.
     :params query_parameters: A dictionary of parameter names and values to filter by.
     """
+
     table = dynamodb.Table(visit_table_name)
+
+    # Set the limit amount
+    if 'limit' in query_parameters and query_parameters['limit'] > 0:
+        limit = query_parameters['limit']
+        del query_parameters['limit']
+    else:
+        limit = DEFAULT_QUERY_LIMIT
+
     if query_parameters:
         try:
             timestamp_expression = buildTimestampKeyExpression(query_parameters, 'timestamp')
@@ -751,20 +920,17 @@ def get_user_visit_information(user_id: str, query_parameters: dict):
 
         try:
             key_expression = Key('user_id').eq(user_id) & timestamp_expression
-            visits = queryByKeyExpression(table, key_expression)
+            visits = queryByKeyExpression(table, key_expression, None, limit)
 
         except Exception as e:
-            logger.info(e)
             body = { 'errorMsg': "Something went wrong on the server." }
             return buildResponse(statusCode = 500, body = body)
 
     else:
         key_expression = Key('user_id').eq(user_id)
-        visits = queryByKeyExpression(table, key_expression)
+        visits = queryByKeyExpression(table, key_expression, None, limit)
 
     body = { 'visits': visits }
-    # FIXME: For debugging purposes right now. Worth keeping?
-    logger.info(f"\nVisits:\n{body}")
 
     return buildResponse(statusCode = 200, body = body)
 
@@ -792,7 +958,6 @@ def get_all_equipment_usage_information(query_parameters: dict):
             items = queryByKeyExpression(table, key_expression, GSI = TIMESTAMP_INDEX)
 
         except Exception as e:
-            logger.info(e)
             body = { 'errorMsg': "Something went wrong on the server." }
             return buildResponse(statusCode = 500, body = body)
 
@@ -811,8 +976,6 @@ def get_all_equipment_usage_information(query_parameters: dict):
         equipment_logs = scanTable(table)
 
     body = { 'equipment_logs': equipment_logs }
-    # FIXME: For debugging purposes right now. Worth keeping?
-    logger.info(f"\nequipment_logs:\n{body}")
 
     return buildResponse(statusCode = 200, body = body)
 
@@ -827,7 +990,7 @@ def create_user_equipment_usage(data: dict):
     table = dynamodb.Table(equipment_table_name)
 
     try:
-        validateCreateEquipmentRequestBody(data)
+        validateEquipmentRequestBody(data)
     except InvalidRequestBody as irb:
         body = { 'errorMsg': str(irb) }
         return buildResponse(statusCode = 400, body = body)
@@ -855,21 +1018,28 @@ def create_user_equipment_usage(data: dict):
             Item=data
         )
     except Exception as e:
-        logger.info(e)
         body = { 'errorMsg': "Something went wrong on the server." }
         return buildResponse(statusCode = 500, body = body)
 
     # If here, put action succeeded. Return 201
     return buildResponse(statusCode = 201, body = {})
 
-def get_user_equipment_usage(user_id: str, query_parameters: dict):
+def get_user_equipment_usage(user_id: str, query_parameters: dict = {}):
     """
     Gets all of the equipment usage objects for a specified user from the equipment usage table.
 
     :params user_id: The name of the user.
     :params query_parameters: A dictionary of parameter names and values to filter by.
     """
+
     table = dynamodb.Table(equipment_table_name)
+
+    if 'limit' in query_parameters and query_parameters['limit'] > 0:
+        limit = query_parameters['limit']
+        del query_parameters['limit']
+    else:
+        limit = DEFAULT_QUERY_LIMIT
+
     if query_parameters:
         try:
             timestamp_expression = buildTimestampKeyExpression(query_parameters, 'timestamp')
@@ -880,20 +1050,17 @@ def get_user_equipment_usage(user_id: str, query_parameters: dict):
 
         try:
             key_expression = Key('user_id').eq(user_id) & timestamp_expression
-            equipment_logs = queryByKeyExpression(table, key_expression)
+            equipment_logs = queryByKeyExpression(table, key_expression, None, limit)
 
         except Exception as e:
-            logger.info(e)
             body = { 'errorMsg': "Something went wrong on the server." }
             return buildResponse(statusCode = 500, body = body)
 
     else:
         key_expression = Key('user_id').eq(user_id)
-        equipment_logs = queryByKeyExpression(table, key_expression)
+        equipment_logs = queryByKeyExpression(table, key_expression, None, limit)
 
     body = { 'equipment_logs': equipment_logs }
-    # FIXME: For debugging purposes right now. Worth keeping?
-    logger.info(f"\nequipment_logs:\n{body}")
 
     return buildResponse(statusCode = 200, body = body)
 
@@ -905,7 +1072,64 @@ def patch_user_equipment_usage(user_id: str, data: dict):
     :params user_id: The name of the user.
     :params data: The updated equipment usage entry.
     """
-    return buildResponse(statusCode = 200, body = {})
+
+    table = dynamodb.Table(equipment_table_name)
+
+    # Ensure an entry to update actually exists
+    query_parameters: dict = {
+        'limit': 1
+    }
+
+    # Use a specific timestamp if provided
+    if 'timestamp' in data:
+        query_parameters['start_timestamp'] = data['timestamp']
+        query_parameters['end_timestamp'] = data['timestamp']
+
+    response = get_user_equipment_usage(user_id, query_parameters)
+
+    statusCode = response['statusCode']
+    response = json.loads(response['body'])
+
+    # If we get request fails or there are more than one responses to work with, return 400
+    if statusCode != 200 or len(response['equipment_logs']) != 1:
+        errorMsg: str = f"Equipment usage logs for {user_id} could not be found. Did you mean to add a usage log?"
+        body = { 'errorMsg': errorMsg }
+        return buildResponse(statusCode = 400, body = body)
+
+    else:
+        equipment_log = response['equipment_logs'][0]
+
+    # "user_id" field is never allowed for update
+    if 'user_id' in data:
+        errorMsg: str = "Updating the 'user_id' field is not allowed. Please remove it before trying to update user {user_id}'s information."
+        body = { 'errorMsg': errorMsg }
+        return buildResponse(statusCode = 400, body = body)
+
+    # Delete the timestamp key in data if it exists before copying values
+    try:
+        del data['timestamp']
+    except KeyError:
+        pass
+    
+    # Ensure data['_ignore'] == '1'
+    data['_ignore'] = '1'
+
+    # Copy all all fields from data to user
+    for key in data:
+        equipment_log[key] = data[key]
+    
+    # Validate new item
+    try:
+        equipment_log = validateEquipmentRequestBody(equipment_log)
+    except InvalidRequestBody as irb:
+        body = { 'errorMsg': str(irb) }
+        return buildResponse(statusCode = 400, body = body)
+
+    # Try putting item back into table
+    table.put_item(Item=equipment_log)
+
+    # Successfully updated user
+    return buildResponse(statusCode = 204, body = {})
 
 
 ################################################
@@ -932,7 +1156,6 @@ def get_all_qualifications_information(query_parameters: dict):
             items = queryByKeyExpression(table, key_expression, GSI = TIMESTAMP_INDEX)
 
         except Exception as e:
-            logger.info(e)
             body = { 'errorMsg': "Something went wrong on the server." }
             return buildResponse(statusCode = 500, body = body)
 
@@ -951,8 +1174,6 @@ def get_all_qualifications_information(query_parameters: dict):
         qualifications = scanTable(table)
 
     body = { 'qualifications': qualifications }
-    # FIXME: For debugging purposes right now. Worth keeping?
-    logger.info(f"\nqualifications:\n{body}")
 
     return buildResponse(statusCode = 200, body = body)
 
@@ -967,7 +1188,7 @@ def create_user_qualifications(data: dict):
     table = dynamodb.Table(qualifications_table_name)
 
     try:
-        validateCreateQualificationRequestBody(data)
+        validateQualificationRequestBody(data)
     except InvalidRequestBody as irb:
         body = { 'errorMsg': str(irb) }
         return buildResponse(statusCode = 400, body = body)
@@ -999,7 +1220,6 @@ def create_user_qualifications(data: dict):
             Item=data
         )
     except Exception as e:
-        logger.info(e)
         body = { 'errorMsg': "Something went wrong on the server." }
         return buildResponse(statusCode = 500, body = body)
 
@@ -1014,8 +1234,6 @@ def get_user_qualifications(user_id: str):
     """
 
     table = dynamodb.Table(qualifications_table_name)
-
-    logger.info(f"\n????\n{user_id}")
 
     """
     Query the table (because get_item doesn't play nice without specifying sort key).
@@ -1037,9 +1255,6 @@ def get_user_qualifications(user_id: str):
 
     qualifications = response['Items'][0]
 
-    # FIXME: For debugging purposes right now. Worth keeping?
-    logger.info(f"\n{user_id} Qualifications:\n{qualifications}")
-
     return buildResponse(statusCode = 200, body = qualifications)
 
 def patch_user_qualifications(user_id: str, data: dict):
@@ -1050,4 +1265,57 @@ def patch_user_qualifications(user_id: str, data: dict):
     :params user_id: The name of the user.
     :params data: The updated qualifications information entry.
     """
-    return buildResponse(statusCode = 200, body = {})
+
+    table = dynamodb.Table(qualifications_table_name)
+
+    # Ensure an entry to update actually exists
+    response = get_user_qualifications(user_id)
+    if response['statusCode'] != 200:
+        errorMsg: str = f"User {user_id} could not be found. Did you mean to add the user?"
+        body = { 'errorMsg': errorMsg }
+        return buildResponse(statusCode = 400, body = body)
+
+    else:
+        # Load the json object stored in response['body']
+        qualifications = json.loads(response['body'])
+
+        """
+        Because the last_updated timestamp will be changed (making a new copy),
+        save a copy of the original entry to delete.
+        """
+        entry_to_delete = qualifications.copy()
+
+    # "user_id" field is never allowed for update
+    if 'user_id' in data:
+        errorMsg: str = "Updating the 'user_id' field is not allowed. Please remove it before trying to update user {user_id}'s information."
+        body = { 'errorMsg': errorMsg }
+        return buildResponse(statusCode = 400, body = body)
+
+    # Update data['last_updated'] and ensure data['_ignore'] == '1'
+    data['last_updated'] = datetime.now().strftime(TIMESTAMP_FORMAT)
+    data['_ignore'] = '1'
+
+    # Copy all all fields from data to user
+    for key in data:
+        qualifications[key] = data[key]
+
+    # Validate new item
+    try:
+        qualifications = validateQualificationRequestBody(qualifications)
+    except InvalidRequestBody as irb:
+        body = { 'errorMsg': str(irb) }
+        return buildResponse(statusCode = 400, body = body)
+    
+    # Try putting item back into table
+    table.put_item(Item=qualifications)
+
+    # Delete the old entry
+    table.delete_item(
+        Key={
+            'user_id': entry_to_delete['user_id'],
+            'last_updated': entry_to_delete['last_updated']
+        }
+    )
+
+    # Successfully updated user
+    return buildResponse(statusCode = 204, body = {})
