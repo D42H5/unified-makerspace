@@ -21,6 +21,8 @@ paths:
   /users:
     get:
       summary: Retrieve all user data
+      security:
+        - ApiKeyAuth: []
       responses:
         200:
           description: OK
@@ -38,6 +40,8 @@ paths:
 
     post:
       summary: Create a new user. Fails on existing UserID
+      security:
+        - ApiKeyAuth: []
       requestBody:
         $ref: '#/components/requestBodies/CreateUser'
       responses:
@@ -56,6 +60,8 @@ paths:
   /users/{user_id}:
     get:
       summary: Retrieve user data for a specific user
+      security:
+        - ApiKeyAuth: []
       parameters:
         - $ref: '#/components/parameters/UserID'
       responses:
@@ -77,6 +83,8 @@ paths:
 
     patch:
       summary: Update data for an existing user
+      security:
+        - ApiKeyAuth: []
       parameters:
         - $ref: '#/components/parameters/UserID'
       requestBody:
@@ -98,6 +106,8 @@ paths:
   /visits:
     get:
       summary: Retrieve all visit data
+      security:
+        - ApiKeyAuth: []
       parameters:
         - $ref: '#/components/parameters/StartTimestamp'
         - $ref: '#/components/parameters/EndTimestamp'
@@ -118,6 +128,8 @@ paths:
 
     post:
       summary: Create a new visit entry. Fails on existing UserID and Timestamp
+      security:
+        - ApiKeyAuth: []
       requestBody:
         $ref: '#/components/requestBodies/CreateVisit'
       responses:
@@ -136,6 +148,8 @@ paths:
   /visits/{user_id}:
     get:
       summary: Retrieve all visits for a specific user
+      security:
+        - ApiKeyAuth: []
       parameters:
         - $ref: '#/components/parameters/UserID'
         - $ref: '#/components/parameters/StartTimestamp'
@@ -162,6 +176,8 @@ paths:
   /equipment:
     get:
       summary: Retrieve all equipment usage data
+      security:
+        - ApiKeyAuth: []
       parameters:
         - $ref: '#/components/parameters/StartTimestamp'
         - $ref: '#/components/parameters/EndTimestamp'
@@ -182,6 +198,8 @@ paths:
 
     post:
       summary: Create a new equipment usage data entry. Fails on existing UserID and Timestamp
+      security:
+        - ApiKeyAuth: []
       requestBody:
         $ref: '#/components/requestBodies/CreateEquipmentUsage'
       responses:
@@ -200,6 +218,8 @@ paths:
   /equipment/{user_id}:
     get:
       summary: Retrieve all equipment usage data for a specific user.
+      security:
+        - ApiKeyAuth: []
       parameters:
         - $ref: '#/components/parameters/UserID'
         - $ref: '#/components/parameters/StartTimestamp'
@@ -224,6 +244,8 @@ paths:
 
     patch:
       summary: Update data in an existing equipment usage data entry. Specify the timestamp field to get a specific entry, or leave it blank to get the data entry with the latest timestamp.
+      security:
+        - ApiKeyAuth: []
       parameters:
         - $ref: '#/components/parameters/UserID'
       requestBody:
@@ -245,6 +267,8 @@ paths:
   /qualifications:
     get:
       summary: Retrieve all qualification data
+      security:
+        - ApiKeyAuth: []
       parameters:
         - $ref: '#/components/parameters/StartTimestamp'
         - $ref: '#/components/parameters/EndTimestamp'
@@ -267,6 +291,8 @@ paths:
 
     post:
       summary: Create a new qualification entry for a user. Fails on existing UserID
+      security:
+        - ApiKeyAuth: []
       requestBody:
         $ref: '#/components/requestBodies/CreateQualifications'
       responses:
@@ -285,6 +311,8 @@ paths:
   /qualifications/{user_id}:
     get:
       summary: Retrieve qualification data for a specific user
+      security:
+        - ApiKeyAuth: []
       parameters:
         - $ref: '#/components/parameters/UserID'
       responses:
@@ -306,6 +334,8 @@ paths:
 
     patch:
       summary: Update a qualification entry for a user
+      security:
+        - ApiKeyAuth: []
       parameters:
         - $ref: '#/components/parameters/UserID'
       requestBody:
@@ -405,11 +435,10 @@ components:
           $ref: '#/components/schemas/mass'
         print_status:
           description: An enum of strings of possible print statuses.
-          enum: [
-            "In progress",
-            "Success",
-            "Failure"
-          ]
+          enum:
+            - "In progress"
+            - "Success"
+            - "Failure"
         print_notes:
           description: Notes about the print.
           type: string
@@ -794,7 +823,7 @@ components:
 
   parameters:
     UserID:
-      name: UserID
+      name: user_id
       in: path
       required: true
       schema:
@@ -884,3 +913,10 @@ components:
               errorMsg:
                 description: A message describing what was wrong with the request.
                 type: string
+
+
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      name: x-api-key
+      in: header
